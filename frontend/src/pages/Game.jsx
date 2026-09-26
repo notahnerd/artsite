@@ -106,7 +106,9 @@ export default function Game({ playoff = false }) {
   }, [autoPlay, rolling, visiblePlays.length, playLog.length, finished]);
 
   const last = visiblePlays[visiblePlays.length - 1];
-  const displayDice = last ? last.dice : [1, 1];
+  const displayWhite = last ? last.dice : [1, 1, 1];
+  const displayRed = last ? last.red : 1;
+  const displayRead = last ? last.read : null;
 
   if (initialLoading || !state || !game) {
     return (
@@ -145,9 +147,9 @@ export default function Game({ playoff = false }) {
           <div className="lg:col-span-4 space-y-4">
             <div className="card-broadcast p-5">
               <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-3">
-                2D6 CHART ROLL
+                3D6 + RED DIE ROLL
               </div>
-              <Dice values={displayDice} rolling={rolling} />
+              <Dice white={displayWhite} red={displayRed} read={displayRead} rolling={rolling} />
               {last && (
                 <div className="mt-4 pt-4 border-t border-white/5">
                   <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">

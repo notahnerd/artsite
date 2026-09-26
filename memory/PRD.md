@@ -8,7 +8,7 @@ NFL football simulation game with dice rolls and chart-based outcomes using real
 ### Core Sim (v1)
 - 32 NFL teams w/ 2025 ratings, 7 star players each + auto-generated backups
 - 18-week randomized regular season
-- Strat-O-Matic style Player Cards (QB/RB/WR/TE/K/DEF)
+- Strat-O-Matic dice: 3 white dice (chart 3–18) + 1 red die (1–3 read OFFENSE card, 4–6 read team DEFENSE card)
 - Animated Game screen: scoreboard, field w/ ball & line markers, dice, play-by-play, box score
 
 ### Postseason & Depth (v2)

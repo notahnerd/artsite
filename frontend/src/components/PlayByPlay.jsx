@@ -50,7 +50,17 @@ function PlayCard({ play, team }) {
       </div>
       <div className="text-sm text-slate-200 leading-snug">{play.description}</div>
       <div className="mt-1.5 flex items-center gap-3 text-[10px] font-mono uppercase tracking-widest text-slate-500">
-        <span>Roll {play.dice[0]}+{play.dice[1]}={play.roll}</span>
+        <span>
+          Roll {play.dice ? play.dice.join("+") : ""}={play.roll}
+          {play.red != null && (
+            <span
+              className="ml-1"
+              style={{ color: play.read === "OFF" ? "#F59E0B" : "#F43F5E" }}
+            >
+              • red {play.red} ({play.read})
+            </span>
+          )}
+        </span>
         <span>•</span>
         <span>{play.play_type}</span>
         <span>•</span>

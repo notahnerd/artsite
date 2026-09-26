@@ -31,9 +31,9 @@ export default function Chart() {
           <div className="text-xs font-mono uppercase tracking-[0.3em] text-amber-400 mb-1">Reference</div>
           <h1 className="font-display font-black uppercase text-3xl md:text-4xl">Player Card Vault</h1>
           <p className="text-slate-300 text-sm max-w-3xl mt-2">
-            Strat-O-Matic style — every player has their own <span className="text-amber-400 font-semibold">2D6 card</span> based
-            on their ability. Passes blend the QB card with the receiver's YAC card, runs read the RB card,
-            all adjusted by the defense's rating. Star players have bigger, less punishing outcomes.
+            Strat-O-Matic style — every play rolls <span className="text-amber-400 font-semibold">3 white dice (sum 3–18)</span> plus
+            <span className="text-rose-400 font-semibold"> 1 red die</span>. Red 1–3 reads the offense card, 4–6 reads the team defense card.
+            Star players have bigger, less punishing outcomes on their own cards.
           </p>
         </div>
 
@@ -93,7 +93,7 @@ export default function Chart() {
 }
 
 function MiniChart({ card }) {
-  const rolls = [2, 4, 6, 7, 8, 10, 11, 12];
+  const rolls = [3, 6, 8, 10, 11, 13, 15, 18];
   const isYac = card.type === "WR" || card.type === "TE";
   const isDef = card.type === "DEF";
   const values = rolls.map((r) => {

@@ -11,12 +11,23 @@ import random
 from typing import Dict, List, Tuple, Optional
 
 from nfl_data import get_team, get_players
-from player_cards import resolve_pass, resolve_run
+from player_cards import resolve_pass, resolve_run, team_pass_defense_card, team_run_defense_card
 from weather import WEATHER_TYPES
 from injuries import roll_injuries_for_game
 
 
 DIFFICULTY_MULT = {"arcade": 1.0, "balanced": 0.7, "realistic": 0.5}
+
+
+def roll_3d6_1red() -> Dict:
+    """Three white dice + one red die. Red 1-3 = OFFENSE read, 4-6 = DEFENSE read."""
+    w1 = random.randint(1, 6)
+    w2 = random.randint(1, 6)
+    w3 = random.randint(1, 6)
+    red = random.randint(1, 6)
+    total = w1 + w2 + w3
+    read = "OFF" if red <= 3 else "DEF"
+    return {"white": [w1, w2, w3], "red": red, "total": total, "read": read}
 
 
 RUN_CHART = {
@@ -136,8 +147,9 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
     phil = (coaching or {}).get(off_id, "balanced")
     play_type = choose_play_type(down, distance, ball_on, score_diff, state["quarter"], state["clock"], phil)
 
-    d1, d2 = roll_2d6()
-    roll = d1 + d2
+    dice = roll_3d6_1red()
+    roll = dice["total"]
+    read = dice["read"]
 
     # Pick starters
     qb = next((p for p in off_players if p.get("starter") and p["pos"] == "QB"), {"name": "QB", "ovr": 75})
@@ -148,7 +160,8 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
         "quarter": state["quarter"], "clock": state["clock"],
         "off": off_id, "def": def_id,
         "down": down, "distance": distance, "ball_on": ball_on,
-        "play_type": play_type, "dice": [d1, d2], "roll": roll,
+        "play_type": play_type,
+        "dice": dice["white"], "red": dice["red"], "read": read, "roll": roll,
         "yards": 0, "result": "NORMAL", "description": "",
         "score_change": None, "turnover": False,
     }
@@ -199,13 +212,13 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
         return event
 
     if play_type == "RUN":
-        yards, result = resolve_run(rb, def_team, roll)
+        yards, result = resolve_run(rb, def_team, roll, read)
         if yards > 0:
             yards = int(round(yards * difficulty_mult))
         _add_player_stat(pstats, rb, "carries", 1)
     else:
         receiver = _pick_receiver(off_players)
-        yards, result = resolve_pass(qb, receiver, def_team, roll)
+        yards, result = resolve_pass(qb, receiver, def_team, roll, read)
         yards, result = _apply_weather_pass(yards, result, weather_code)
         if yards > 0:
             yards = int(round(yards * difficulty_mult))
@@ -226,6 +239,42 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
         state["distance"] = 10
         _advance_clock(state, 15)
         return event
+
+    if result == "INT_RETURN_TD":
+        event["turnover"] = True
+        event["yards"] = 0
+        event["result"] = "INT_RETURN_TD"
+        picker = _pick_defender(def_players)
+        event["description"] = f"PICK SIX! {picker['name']} intercepts {qb['name']} and takes it to the house!"
+        _add_player_stat(pstats, qb, "int", 1)
+        _add_player_stat(pstats, picker, "picks", 1)
+        state[f"{def_id}_score"] += 7
+        event["score_change"] = {"team": def_id, "points": 7}
+        _score_flip(state, off_id)
+        _advance_clock(state, 20)
+        return event
+
+    if result == "FUMBLE":
+        event["turnover"] = True
+        event["yards"] = 0
+        event["result"] = "FUMBLE"
+        forcer = _pick_defender(def_players)
+        event["description"] = f"FUMBLE! {forcer['name']} punches the ball out from {rb['name']}. Defense recovers!"
+        state["possession"] = def_id
+        state["ball_on"] = 100 - ball_on
+        state["down"] = 1
+        state["distance"] = 10
+        _advance_clock(state, 12)
+        return event
+
+    if result == "COVERAGE_BUST":
+        rec_name = event.get("target") or "the receiver"
+        event["description"] = f"COVERAGE BUST! {qb['name']} finds {rec_name} wide open for {yards} yards."
+    if result == "HURRY":
+        event["description"] = f"Pressure! {qb['name']} throws it away under a hurry (loss of {abs(yards)})."
+    if result == "STUFF":
+        stuffer = _pick_defender(def_players)
+        event["description"] = f"STUFFED at the line! {stuffer['name']} closes the gap on {rb['name']} for {yards} yard{'s' if yards != -1 else ''}."
 
     if result == "TFL":
         yards = min(yards, -2)

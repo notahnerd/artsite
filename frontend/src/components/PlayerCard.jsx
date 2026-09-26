@@ -63,7 +63,7 @@ export default function PlayerCard({ team, player, children }) {
           {chart && (
             <>
               <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-2">
-                Player Card • {type} • Read row by 2D6 roll
+                Player Card • {type} • Read row by 3D6 roll (3–18)
               </div>
               <CardTable chart={chart} type={type} />
             </>
@@ -75,14 +75,14 @@ export default function PlayerCard({ team, player, children }) {
 }
 
 function CardTable({ chart, type }) {
-  const rolls = Array.from({ length: 11 }, (_, i) => i + 2);
+  const rolls = Array.from({ length: 16 }, (_, i) => i + 3);
   const isYacCard = type === "WR" || type === "TE";
   const isDef = type === "DEF";
   return (
     <table className="w-full text-sm" data-testid="player-card-table">
       <thead>
         <tr className="text-[10px] font-mono uppercase tracking-widest text-slate-400 text-left border-b border-white/5">
-          <th className="py-1.5">Roll</th>
+          <th className="py-1.5">3D6</th>
           {isYacCard ? (
             <>
               <th>YAC</th>
@@ -105,7 +105,7 @@ function CardTable({ chart, type }) {
           const y = cell.yards;
           return (
             <tr key={r} className="border-b border-white/5">
-              <td className="py-1.5 font-mono font-bold text-amber-300 tabular-nums w-10">{r}</td>
+              <td className="py-1 font-mono font-bold text-amber-300 tabular-nums w-10">{r}</td>
               {isYacCard ? (
                 <>
                   <td className="font-mono tabular-nums text-emerald-300">+{cell.yac}</td>
