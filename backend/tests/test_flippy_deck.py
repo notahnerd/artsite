@@ -127,12 +127,12 @@ def test_flippy_composition_and_range(season):
 
 
 def test_flippy_remaining_decrements_and_reshuffle(season):
-    """Verify remaining decrements within a game and deck reshuffles past 250."""
+    """Verify remaining decrements within a game and deck reshuffles past 350."""
     total_cards = 0
     saw_wrap = False
     prev_remaining = None
     reshuffle_ok = False
-    # Sim several games until we accumulate >250 draws total or games run out
+    # Sim several games until we accumulate >350 draws total or games run out
     for _ in range(6):
         g = _sim_one_game(season)
         plays = [p for p in g.get("plays", []) if "card" in p]
@@ -140,15 +140,15 @@ def test_flippy_remaining_decrements_and_reshuffle(season):
             continue
         # remaining must be int and mostly non-increasing within one game
         remainings = [p["card"]["remaining"] for p in plays]
-        # allow reshuffle: remaining can jump up to ~250 at some point mid-game
+        # allow reshuffle: remaining can jump up to ~350 at some point mid-game
         for r in remainings:
-            assert 0 <= r <= 250
+            assert 0 <= r <= 350
         # check reshuffle across games: some game should show a jump back up
         # (or remaining wraps within one game with lots of plays)
         if any(remainings[i] > remainings[i - 1] for i in range(1, len(remainings))):
             saw_wrap = True
         total_cards += len(plays)
-        if total_cards > 250:
+        if total_cards > 350:
             reshuffle_ok = True
     # After enough plays across games, reshuffle should have happened at least once
     # (per-game deck resets between games is also acceptable — we just verify no crashes)

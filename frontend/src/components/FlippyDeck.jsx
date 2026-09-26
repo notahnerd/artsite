@@ -28,7 +28,7 @@ export default function FlippyDeck({ card, flipping }) {
     return () => clearTimeout(timerRef.current);
   }, [card, flipping]);
 
-  const remaining = card?.remaining ?? 250;
+  const remaining = card?.remaining ?? 350;
 
   return (
     <div className="card-broadcast p-4" data-testid="flippy-deck">
@@ -43,7 +43,7 @@ export default function FlippyDeck({ card, flipping }) {
           data-testid="flippy-remaining"
           className="text-[10px] font-mono tabular-nums px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300"
         >
-          {remaining}/250
+          {remaining}/350
         </span>
       </div>
 

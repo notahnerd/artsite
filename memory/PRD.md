@@ -55,8 +55,8 @@ NFL football simulation game with dice rolls and chart-based outcomes using real
 - **Team-id validation**: coaching, playbook, rival, depth-chart, trade endpoints reject unknown team IDs (400).
 - **Dependency trim**: removed unused sensitive deps (python-jose, pyjwt, passlib, bcrypt, boto3, emergentintegrations); added slowapi.
 
-### Flippy Deck (v6 - 2026-02-26)
-- **250-card pre-play deck per game**: 150 "ROLL DICE" cards + 98 yardage cards (-6 .. +45, realistic right-skewed curve, 2× 45-yd breakaways) + 2 concussion injury cards. Auto-reshuffles when empty.
+### Flippy Deck (v6 - 2026-02-26, expanded v6.2)
+- **350-card pre-play deck per game**: 250 "ROLL DICE" cards + 98 yardage cards (-6 .. +45, realistic right-skewed curve, 2× 45-yd breakaways) + 2 concussion injury cards. Auto-reshuffles when empty.
 - **Draw trigger**: RUN/PASS scrimmage plays only. PUNT/FG/XP/Kickoff never draw a card.
 - **YARDS card override**: card.yards replaces dice-chart yards; TDs, first downs and turnover-on-downs still computed from ball position. Random fumble roll suppressed on card overrides.
 - **INJURY card**: 40% QB / 60% RB/WR/TE/K; victim marked injured & out for game, first healthy backup auto-promoted.

@@ -1,8 +1,8 @@
-"""Flippy Deck — a 250-card pre-play deck that either resolves the play
-directly (100 result cards) or delegates to the dice engine (150 dice cards).
+"""Flippy Deck — a 350-card pre-play deck that either resolves the play
+directly (100 result cards) or delegates to the dice engine (250 dice cards).
 
-Composition (exactly 250):
-- 150 DICE cards        → "Roll the dice" (default flow)
+Composition (exactly 350):
+- 250 DICE cards        → "Roll the dice" (default flow)
 - 98  YARDS cards       → override play yards; range -6 .. +45
 - 2   INJURY cards      → concussion, random offensive starter out for game;
                            40% chance it is the QB
@@ -78,8 +78,8 @@ SKEW_PRESETS = {
     "chaos":    _normalize_curve(_CHAOS_CURVE),
 }
 
-DECK_SIZE = 250
-NUM_DICE = 150
+DECK_SIZE = 350
+NUM_DICE = 250
 NUM_INJURY = 2
 MAX_SIGNATURE_CARDS = 3
 MAX_SIGNATURE_COPIES = 3
