@@ -114,6 +114,7 @@ function CardTable({ chart, type }) {
               <td className="py-1 font-mono font-bold text-amber-300 tabular-nums w-10">{r}</td>
               {isYacCard ? (
                 <>
+                  {/* TD */}
                   <td className="font-mono tabular-nums text-emerald-300">+{cell.yac}</td>
                   {/* breakaway */}
                   <td className="text-xs text-slate-400 font-mono">{cell.drop ? "DROP" : ""}</td>
