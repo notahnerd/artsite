@@ -1,132 +1,154 @@
-# Flippy Football — Flippy Deck (PHP prototype)
+# Flippy Football — Gridiron Roller (PHP + MySQL port)
 
-A standalone PHP port of the **Flippy Deck** — the pre-play mechanic from the NFL tabletop sim. This is a **core-logic prototype**, not a full port of the app. Perfect for wiring into any PHP framework (Laravel, Symfony, plain PHP) or running as a CLI demo.
+A **complete port** of the NFL tabletop simulator to PHP 8.1+ / MySQL — ready for cheap shared hosting. Server-rendered HTML pages, vanilla JS for the dice / flip-card animations, no build step, no npm.
 
-## What's here
+## What's inside
 
-| File | Purpose |
-| --- | --- |
-| `flippy_deck.php` | The `FlippyDeck` class — 350-card deck, 4 skew presets, signature cards, concussion injuries |
-| `demo.php`        | CLI runner that shuffles a deck, draws N cards, prints a summary + an injury walk-through |
-| `README.md`       | You're reading it |
+```
+flippy_football/
+├── config.php               — env-driven DB + app config (edit or set env vars)
+├── schema.sql               — MySQL schema (seasons, game_logs, rate_limit_hits)
+├── includes/                — All the game logic
+│   ├── db.php               — PDO singleton
+│   ├── helpers.php          — JSON I/O, owner-token auth, rate limiter, security headers
+│   ├── nfl_data.php         — 32 teams + rosters (Madden-style OVR)
+│   ├── player_cards.php     — 3-18 Strat-O-Matic charts (QB/RB/WR/DEF/K)
+│   ├── flippy_deck.php      — 350-card deck (250 DICE + 98 YARDS + 2 INJURY), 4 skew presets, signature cards
+│   ├── weather.php          — 5 weather types, dome bias
+│   ├── injuries.php         — random per-starter injury rolls
+│   ├── rivalries.php        — division + legacy rivals, extra rival slot
+│   ├── season.php           — schedule generator + standings
+│   ├── playoffs.php         — 14-team bracket (WC → DIV → CONF → SB)
+│   ├── franchise.php        — multi-year aging, retirements, rookies
+│   └── sim_engine.php       — the beast: 3d6+1d6 chart resolution + play-by-play
+├── public/                  — Web root (point Apache/Nginx here)
+│   ├── index.php            — front controller + rate-limit gate
+│   ├── api.php              — /api/* JSON dispatcher
+│   ├── .htaccess            — clean URL rewrites for Apache
+│   ├── assets/
+│   │   ├── style.css        — full broadcast theme
+│   │   └── game.js          — dice roll + flip animations + play pacing
+│   └── pages/
+│       ├── _layout.php      — HTML shell (nav, footer)
+│       ├── home.php         — team picker + season creator
+│       ├── season.php       — dashboard: schedule, standings, matchup panel
+│       ├── game.php         — live scoreboard + dice + Flippy Deck + play feed
+│       └── playoffs.php     — 14-team bracket
+└── cli/
+    └── sim.php              — one-off game sim from the terminal
+```
 
 ## Requirements
 
-- **PHP 8.1+** (uses typed properties, match expressions, first-class callable syntax)
-- No Composer, no extensions required (removed `mbstring` dep on purpose)
+- **PHP 8.1+** (`typed properties`, `match`, `str_starts_with`) with `pdo_mysql` extension
+- **MySQL 5.7+ / MariaDB 10.3+**
+- Apache with `mod_rewrite`, **or** Nginx with a rewrite rule to `index.php`
 
-## Quick start
+That's it. No Composer, no Node, no Docker required.
+
+## Install on shared hosting (cPanel / DirectAdmin / Plesk)
+
+1. **Upload** the whole `flippy_football/` folder somewhere outside your web root (e.g., `/home/you/flippy_football`).
+2. **Point your web-root / addon domain** to `flippy_football/public/`.
+3. **Create the database** in your host's control panel and import `schema.sql`.
+4. **Configure DB creds** — either edit `config.php` directly, or set environment variables (`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`) in cPanel's Env Vars section.
+5. Visit `https://your-domain.com/` — you should see the team picker.
+
+### Local dev (Mac/Linux)
 
 ```bash
-# 1) Copy this folder to your machine (if you haven't already)
-git clone <your-emergent-repo> "flippy football"
-cd "flippy football"
+# Set up DB
+mysql -u root -p -e "CREATE DATABASE flippy_football;"
+mysql -u root -p flippy_football < schema.sql
 
-# 2) Run the demo
-php demo.php                                  # balanced deck, 350 draws
-php demo.php --preset=chaos --draws=500       # chaos + a reshuffle
-php demo.php --preset=air_raid --sig          # add 6 signature cards
+# Run PHP's built-in server
+export DB_HOST=localhost DB_NAME=flippy_football DB_USER=root DB_PASS=''
+cd flippy_football
+php -S localhost:9080 -t public
+
+# Open http://localhost:9080
 ```
 
-## Deck composition (default = balanced, 350 cards)
+### Quick CLI sim (no web server needed)
 
-| Card type | Count | Behavior |
-| --- | ---: | --- |
-| **DICE**   | 250 | "Roll the dice" — falls through to your dice-chart resolution |
-| **YARDS**  |  98 | Overrides play yards. Default range: **-6 .. +45**. Realistic right-skewed curve |
-| **INJURY** |   2 | Random offensive starter concussed (out for game). **40% QB / 60% skill** |
+```bash
+php cli/sim.php KC BUF --difficulty=arcade --rivalry
+php cli/sim.php PHI SF --deck-preset=chaos
+```
 
-## Yardage-skew presets
+## Game features
 
-| Preset | Feel | Yards range |
+| Category | Included |
+| --- | --- |
+| **Roster / ratings** | 32 teams, real 2025 starters, Madden-style OVR 60-99, auto-generated backups |
+| **Sim engine** | 3d6 chart index + 1d6 offense/defense read (Strat-O-Matic style) |
+| **Flippy Deck** | 350 cards per game: 250 DICE + 98 YARDS (-6..+45) + 2 INJURY, auto-reshuffle |
+| **Skew presets** | Balanced / Power Run / Air Raid / Chaos (chaos → -10..+80 range) |
+| **Signature cards** | Up to 3 manager-authored cards, unlocked after 2 completed seasons |
+| **Weather** | Clear, Rain, Snow, Wind, Dome — modifies pass yards / kicks |
+| **Coaching** | Aggressive / Balanced / Conservative — changes 4th-down + pass tendency |
+| **Playbook** | Per-team `pass_bias` slider (-0.25 to +0.25) |
+| **Rivalries** | Division auto-rivals + legacy pairs (KC-LV, DAL-PHI, GB-CHI, etc.) — +8% intensity |
+| **Injuries** | Per-starter concussion rolls (post-game) + concussion card (in-game) |
+| **Playoffs** | 14-team bracket, WC → DIV → CONF → SB, top seed bye |
+| **Franchise** | Multi-year progression: age/retire/rookie draft class |
+| **Persistence** | MySQL — every season, game log, standings survives restart |
+| **Security** | Owner-token check on all mutations, sliding-window rate limits, HSTS + X-Frame-Options |
+
+## API endpoints
+
+All endpoints under `/api/`. Mutations require `X-Owner-Token` header (returned from `/api/season/create`).
+
+| Verb | Path | Purpose |
 | --- | --- | --- |
-| `balanced`  | Realistic curve, rare breakaways | -6 .. +45 |
-| `power_run` | Grind-it-out, more short gains   | -4 .. +15 |
-| `air_raid`  | Boom-or-bust downfield attack     | -8 .. +55 |
-| `chaos`     | Wild swings both directions       | -10 .. +80 |
+| GET  | `/api/teams` | List all 32 teams |
+| GET  | `/api/teams/{id}` | Single team + starters + backups |
+| POST | `/api/season/create` | Create a new franchise season (returns `owner_token`) |
+| GET  | `/api/season/{id}` | Season doc + computed standings |
+| POST | `/api/season/sim-game` | Sim a single game — returns full play-by-play + saves `log_id` |
+| POST | `/api/season/sim-week` | Sim all remaining games in the current week |
+| GET  | `/api/game-log/{log_id}` | Full play-by-play + player stats |
+| POST | `/api/season/coaching` | Set a team's coaching philosophy |
+| POST | `/api/season/playbook` | Set a team's pass bias |
+| GET  | `/api/season/{id}/deck-config` | Read Flippy Deck config + unlock status |
+| POST | `/api/season/deck-config` | Save custom Flippy Deck (locked until 2 seasons) |
+| POST | `/api/season/{id}/start-playoffs` | Seed the 14-team bracket |
+| GET  | `/api/season/{id}/rivals/{team}` | Division + legacy + user-picked rivals for a team |
 
-## Signature cards
+## Security defaults
 
-Manager-authored cards (up to 3, 1–3 copies each). They **replace DICE cards** so the deck stays at 350.
+- Every response ships with `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000`.
+- Owner-token is a `bin2hex(random_bytes(32))` = 64 hex chars, stored per-season; client persists in `localStorage.gr_owner_tokens`.
+- Sliding-window rate limiter uses a small `rate_limit_hits` table — 120 req/min per IP globally, 60/min for sim-game, 10/min for season-create.
+- Request bodies over 1 MB are rejected at the JSON parser.
 
-```php
-$config = [
-    'preset' => 'chaos',
-    'signature_cards' => [
-        ['label' => 'Arrowhead Roar', 'yards' => 25, 'count' => 3],
-        ['label' => 'Fumbleroski',    'yards' => -8, 'count' => 2],
-        ['label' => 'Philly Special', 'yards' => 45, 'count' => 1],
-    ],
-];
-$deck = new FlippyDeck($config);
-```
+## Things the Python original has that this port doesn't (yet)
 
-Constraints (auto-enforced by `sanitizeSignatureCards`):
-- Max **3** signature cards
-- Yards clamp to **-10 .. +60**
-- Copies clamp to **1 .. 3**
-- Label truncates at **24** characters
+- Depth-chart editor UI (backend logic ready)
+- Trade dialog UI
+- Injury news ticker
+- Player card deep-dive page
+- Stat leaders page
+- Franchise dashboard UI (backend ready via next-year endpoint — not wired yet)
 
-## API
+Add them as you go — the sim engine and API are complete. Everything you need is either an endpoint or a plain PHP page you extend.
 
-```php
-$deck  = new FlippyDeck($config);   // config is optional; defaults to balanced
-$card  = $deck->draw();             // pop next card; auto-reshuffles when empty
-$left  = $deck->remaining();        // int, cards left in the current shuffle
-$deck->drawn;                       // total draws since last reshuffle
-$deck->reshuffles;                  // reshuffle count for this deck instance
-```
+## Deployment notes
 
-### Card shapes
+- **Apache:** the included `.htaccess` handles rewrites. Just point the docroot at `public/`.
+- **Nginx:** add this location block to your server file:
+  ```nginx
+  location / {
+      try_files $uri $uri/ /index.php?$query_string;
+  }
+  location ~ \.php$ {
+      fastcgi_pass unix:/var/run/php-fpm/www.sock;
+      fastcgi_index index.php;
+      include fastcgi_params;
+  }
+  ```
+- **Shared hosting without shell access:** upload via FTP, set the docroot to `public/` in cPanel, import `schema.sql` via phpMyAdmin. Should just work.
 
-```php
-['type' => 'DICE']
-['type' => 'YARDS',  'yards' => 8]
-['type' => 'YARDS',  'yards' => 25, 'signature' => true, 'label' => 'Arrowhead Roar']
-['type' => 'INJURY']  // apply the injury yourself with the helpers below
-```
+## License / credits
 
-### Injury helpers
-
-```php
-$victim = FlippyDeck::pickInjuryTarget($offensePlayers);
-if ($victim) {
-    $inj = FlippyDeck::applyConcussion($offensePlayers, $victim);
-    // $inj = ['player' => ..., 'pos' => ..., 'desc' => ..., 'replacement' => ...]
-}
-```
-
-`$offensePlayers` is a plain array of dicts. Each player must have `name`, `pos`, `starter` (bool), `injured` (bool), and ideally `ovr` (int, drives who gets promoted).
-
-## How to wire into your PHP app
-
-Any drive loop that resolves a RUN/PASS play:
-
-```php
-foreach ($drive->plays() as $play) {
-    if (!in_array($play->type, ['RUN', 'PASS'], true)) continue;
-
-    $card = $deck->draw();
-
-    if ($card['type'] === 'INJURY') {
-        $victim = FlippyDeck::pickInjuryTarget($offense);
-        if ($victim) FlippyDeck::applyConcussion($offense, $victim);
-    } elseif ($card['type'] === 'YARDS') {
-        $play->yards        = $card['yards'];    // override the dice chart
-        $play->cardOverride = true;              // skip fumble/INT rolls
-    }
-    // else: type === 'DICE' → fall through to your existing chart lookup
-}
-```
-
-## Not included in this prototype
-
-The full Python app has these pieces you'd need to build yourself if porting further:
-
-- Play-by-play sim engine (3d6 + 1d6 chart resolution)
-- Player cards (3-18 accuracy charts)
-- Weather, coaching philosophies, playbooks, rivalries
-- MongoDB persistence, ownership tokens, rate limits
-- React frontend with the flip-card animation
-
-Ping me if you want any of those ported next.
+Made with the Gridiron Roller — a tabletop simulation of pro football. Player names & team likenesses used editorially for a simulation prototype.

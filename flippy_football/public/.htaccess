@@ -1,0 +1,15 @@
+# Route everything through index.php (except real files/assets)
+RewriteEngine On
+RewriteBase /
+
+# Serve real files directly
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteRule ^ index.php [L,QSA]
+
+# Deny direct access to .env / config / includes just in case they're placed here
+<FilesMatch "\.(env|sql|md)$">
+    Require all denied
+</FilesMatch>
