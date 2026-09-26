@@ -115,6 +115,7 @@ function CardTable({ chart, type }) {
               {isYacCard ? (
                 <>
                   <td className="font-mono tabular-nums text-emerald-300">+{cell.yac}</td>
+                  {/* breakaway */}
                   <td className="text-xs text-slate-400 font-mono">{cell.drop ? "DROP" : ""}</td>
                 </>
               ) : isDef ? (
