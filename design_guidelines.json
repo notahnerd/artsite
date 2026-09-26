@@ -1,0 +1,124 @@
+{
+  "project_name": "NFL Tabletop Football Simulator",
+  "theme": "Dark Mode Broadcast & Tabletop Tactical Command",
+  "archetype": "THE PERFORMANCE PRO / BROADCAST TACTICAL COMMAND",
+  "typography": {
+    "heading_font": "Barlow Condensed, Outfit, sans-serif",
+    "body_font": "Inter, system-ui, sans-serif",
+    "mono_font": "JetBrains Mono, Source Code Pro, monospace",
+    "font_loader": "<link href=\"https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,800;0,900;1,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap\" rel=\"stylesheet\">",
+    "sizes": {
+      "hero_title": "text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight uppercase",
+      "section_title": "text-2xl sm:text-3xl lg:text-4xl font-extrabold uppercase tracking-wide",
+      "card_title": "text-lg sm:text-xl font-bold tracking-normal uppercase",
+      "stat_number": "text-3xl sm:text-4xl lg:text-5xl font-black font-mono tracking-tighter",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "badge": "text-xs font-semibold font-mono uppercase tracking-widest"
+    }
+  },
+  "colors": {
+    "background": "#070A10",
+    "surface_dark": "#0D1322",
+    "surface_card": "rgba(18, 26, 43, 0.85)",
+    "border_glow": "rgba(255, 255, 255, 0.12)",
+    "primary": "#F59E0B",
+    "primary_hover": "#D97706",
+    "field_green": "#059669",
+    "turf_dark": "#064E3B",
+    "endzone_red": "#DC2626",
+    "endzone_blue": "#2563EB",
+    "accent_cyan": "#06B6D4",
+    "accent_yellow": "#EAB308",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "text_muted": "#64748B",
+    "dice_face": "#FFFFFF",
+    "dice_dot": "#1E293B"
+  },
+  "layout_and_grids": {
+    "app_shell": "min-h-screen bg-[#070A10] text-[#F8FAFC] flex flex-col font-sans selection:bg-amber-500 selection:text-black",
+    "nav_bar": "sticky top-0 z-50 backdrop-blur-xl bg-[#0D1322]/90 border-b border-white/10 px-4 lg:px-8 py-3 flex items-center justify-between",
+    "dashboard_bento": "grid grid-cols-1 md:grid-cols-8 lg:grid-cols-12 gap-4 lg:gap-6 p-4 md:p-6 max-w-7xl mx-auto w-full",
+    "game_sim_layout": "grid grid-cols-1 lg:grid-cols-12 gap-6 p-4 lg:p-6 max-w-[1600px] mx-auto w-full",
+    "card_style": "bg-[#0D1322]/80 border border-white/10 rounded-xl p-5 shadow-2xl backdrop-blur-md relative overflow-hidden transition-all duration-200 hover:border-amber-500/40"
+  },
+  "visual_enhancers": {
+    "stadium_glow": "radial-gradient(circle at 50% -20%, rgba(245, 158, 11, 0.15), transparent 70%)",
+    "turf_pattern": "repeating-linear-gradient(90deg, #064E3B 0px, #064E3B 40px, #047857 40px, #047857 80px)",
+    "yard_lines": "repeating-linear-gradient(90deg, transparent, transparent 49px, rgba(255, 255, 255, 0.4) 50px, transparent 51px, transparent 100px)",
+    "led_scoreboard_text": "font-mono font-black text-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)]",
+    "dice_3d_shadow": "drop-shadow-[0_10px_15px_rgba(0,0,0,0.8)] shadow-[inset_0_2px_4px_rgba(255,255,255,0.8)]"
+  },
+  "key_components": {
+    "live_scoreboard": "High-contrast LED display showing Quarter, Clock, Down & Distance, Possession indicator, Timeouts, Home vs Away scores.",
+    "animated_field_canvas": "2D Football Field canvas or SVG displaying scrimmage line (blue line), first down line (yellow line), animated ball marker, player tokens, and play movement path animation.",
+    "dice_roller_widget": "Interactive tabletop 2D6 / 2D20 roll animation trigger with tactile rolling motion, audio toggle effect, dice outcome display, and instant cross-reference lookup.",
+    "play_chart_matrix": "Interactive lookup chart showing standard tabletop dice combinations (e.g. 2 to 12) mapped against Offense Rating vs Defense Rating to produce play outcomes (Pass Yds, Run Yds, Sacks, Incompletions, Interceptions, Fumbles, Touchdowns).",
+    "play_by_play_feed": "Real-time scrollable ticker with animated play cards, yards gained/lost badges, player attribution tags, and play type filters.",
+    "box_score_modal": "Comprehensive game statistics tabbed into Team Stats, Passing, Rushing, Receiving, Defense, and Kicking numbers.",
+    "season_dashboard": "Interactive hub showing Standings table (W-L-T, PCT, PF, PA, Streak), Schedule & Results with Quick Sim / Play Game buttons, and Team Roster management sorted by rating/position."
+  },
+  "image_urls": {
+    "stadium_lights": [
+      {
+        "url": "https://images.unsplash.com/photo-1638573615178-6f2950746614?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwxfHxhbWVyaWNhbiUyMGZvb3RiYWxsJTIwc3RhZGl1bSUyMGdhbWUlMjBhY3Rpb24lMjBsaWdodHMlMjBuaWdodCUyMGZsb29kbGlnaHRzJTIwc3RhZGl1bSUyMGxpZ2h0cyUyMHNwb3J0cyUyMGZpZWxkfGVufDB8fHx8MTc5MDI4NjY1N3ww&ixlib=rb-4.1.0&q=85",
+        "category": "stadium_background",
+        "description": "Floodlights in dark stadium night atmosphere"
+      },
+      {
+        "url": "https://images.pexels.com/photos/3131406/pexels-photo-3131406.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "category": "hero_banner",
+        "description": "Vibrant night sports match under full illuminated stadium"
+      },
+      {
+        "url": "https://images.pexels.com/photos/35898730/pexels-photo-35898730.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "category": "game_header",
+        "description": "Aerial view of illuminated stadium pitch"
+      }
+    ]
+  },
+  "testing_and_data_attributes": {
+    "requirement": "ALL interactive components, buttons, inputs, tabs, modal triggers, dice roll triggers, simulation controls, and key metrics MUST have explicit data-testid attributes.",
+    "convention": "kebab-case role-based format (e.g. data-testid='roll-dice-btn', data-testid='play-chart-toggle-btn', data-testid='team-select-card-KC')",
+    "required_test_ids": [
+      "nav-season-tab",
+      "nav-game-tab",
+      "nav-standings-tab",
+      "nav-chart-tab",
+      "team-select-dropdown",
+      "start-season-btn",
+      "sim-game-btn",
+      "play-next-play-btn",
+      "auto-sim-game-btn",
+      "dice-roll-trigger-btn",
+      "dice-roll-result-display",
+      "scoreboard-home-score",
+      "scoreboard-away-score",
+      "scoreboard-down-distance",
+      "field-ball-position",
+      "play-by-play-container",
+      "play-chart-matrix-grid",
+      "box-score-toggle-btn",
+      "standings-table",
+      "roster-table"
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Use standard JavaScript (.js / .jsx) components in /app/frontend/src/components/ and /app/frontend/src/components/ui/",
+    "Ensure Google Font links for Barlow Condensed and JetBrains Mono are included in public/index.html or imported in index.css",
+    "Build a robust deterministic simulation engine with seed data covering all 32 NFL teams with realistic 2025 ratings (Offense, Defense, Special Teams, QB, RB, WR, DEF stars)",
+    "Implement tabletop dice roll logic: 2D6 roll (range 2-12) cross-referenced against offensive rating vs defensive rating to determine yards gained, turnover, incomplete pass, sack, or touchdown",
+    "Provide interactive animated 2D field canvas/SVG with yard lines, endzones, line of scrimmage, first down marker, and animated play trajectory",
+    "Include play-by-play visual execution: when dice is rolled, show rolling dice animation -> highlight corresponding cell on the Play Matrix -> move ball on field -> append event to play-by-play log",
+    "Include a Play Chart Visualizer tab/modal so players can view the complete probability chart and how ratings modify dice rolls",
+    "Support full Season Mode: 18-week schedule, sim week, view team standings, player stats leaders, and team box scores",
+    "Use Sonner for toasts (already present in /app/frontend/src/components/ui/sonner.jsx) for key notifications like Touchdown, Interception, Fumble, Field Goal Good, or Game Over",
+    "Ensure high contrast on dark surfaces and complete accessibility for all interactive buttons and cards."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": {
+    "avoid_ai_slop": "Do not build plain gray panels. Use broadcast sports styling with team color accents, crisp 1px borders, bold condensed headers, LED scoreboard text, and tactile 3D dice visuals.",
+    "spacing": "Maintain clean generous padding (p-4 to p-8) and well-balanced grid gaps so the telemetry and scoreboard feel readable and un-cluttered.",
+    "no_universal_transition": "Never set 'transition: all' in global CSS. Apply transitions specifically to hover and background states to prevent transform flickering during dice rolls or play animations.",
+    "testing_readiness": "Every interactive button, tab, dropdown, metric display, and table row MUST have data-testid attributes attached."
+  }
+}
