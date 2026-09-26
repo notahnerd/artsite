@@ -7,6 +7,8 @@ import Game from "@/pages/Game";
 import Chart from "@/pages/Chart";
 import Playoffs from "@/pages/Playoffs";
 import LeadersPage from "@/pages/LeadersPage";
+import Share from "@/pages/Share";
+import Franchise from "@/pages/Franchise";
 
 function App() {
   return (
@@ -20,6 +22,8 @@ function App() {
           <Route path="/season/:id/chart" element={<Chart />} />
           <Route path="/season/:id/playoffs" element={<Playoffs />} />
           <Route path="/season/:id/leaders" element={<LeadersPage />} />
+          <Route path="/season/:id/franchise" element={<Franchise />} />
+          <Route path="/share/game/:logId" element={<Share />} />
         </Routes>
       </BrowserRouter>
       <Toaster

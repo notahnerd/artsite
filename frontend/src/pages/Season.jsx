@@ -10,6 +10,7 @@ import PlayoffRace from "@/components/PlayoffRace";
 import InjuryReport from "@/components/InjuryReport";
 import TradeDialog from "@/components/TradeDialog";
 import DifficultyPicker from "@/components/DifficultyPicker";
+import CoachingPicker from "@/components/CoachingPicker";
 import { Settings, RefreshCw, Bandage } from "lucide-react";
 
 export default function Season() {
@@ -79,6 +80,12 @@ export default function Season() {
               seasonId={id}
               current={season.difficulty || "balanced"}
               onChange={(d) => setSeason((s) => ({ ...s, difficulty: d }))}
+            />
+            <CoachingPicker
+              seasonId={id}
+              team={season.user_team}
+              current={(season.coaching || {})[season.user_team] || "balanced"}
+              onChange={(c) => setSeason((s) => ({ ...s, coaching: { ...(s.coaching || {}), [s.user_team]: c } }))}
             />
             {currentWeek === 8 && !isPlayoffsReady && (
               <button

@@ -17,6 +17,7 @@ from season import generate_schedule, compute_standings
 from weather import WEATHER_TYPES, roll_weather
 from playoffs import seed_playoffs, build_bracket, advance_bracket, ROUND_LABELS
 from injuries import active_injuries, injured_names
+from franchise import roll_franchise_year
 
 
 ROOT_DIR = Path(__file__).parent
@@ -71,6 +72,16 @@ class TradeReq(BaseModel):
     other_player: str
 
 
+class CoachingReq(BaseModel):
+    season_id: str
+    team: str
+    philosophy: str  # aggressive | balanced | conservative
+
+
+class NextYearReq(BaseModel):
+    season_id: str
+
+
 # ---------- Helpers ----------
 async def _load_season(season_id):
     s = await db.seasons.find_one({"id": season_id}, {"_id": 0})
@@ -98,12 +109,21 @@ def _apply_new_injuries(season, team_id, week, new_injuries: List[Dict]):
 
 
 def _team_roster_with_trades(season, team_id):
-    """Return roster including trade-added players and excluding traded-away starters."""
-    base = get_players(team_id)
+    """Return roster including trade-added players and excluding traded-away starters.
+    If franchise_rosters is present, use that as the base (multi-year mode).
+    """
+    fr = (season.get("franchise_rosters") or {}).get(team_id)
+    base = fr if fr else get_players(team_id)
+    # Ensure starter/role tags exist
+    tagged = [dict(p, starter=p.get("starter", True), role=p.get("role", p.get("pos"))) for p in base]
     removed = set((season.get("trade_removed") or {}).get(team_id, []))
-    filtered = [p for p in base if p["name"] not in removed]
+    filtered = [p for p in tagged if p["name"] not in removed]
     added = (season.get("trade_players") or {}).get(team_id, [])
     return filtered + [dict(p, starter=True) for p in added]
+
+
+def _coaching(season):
+    return season.get("coaching") or {}
 
 
 # ---------- Routes ----------
@@ -210,6 +230,7 @@ async def sim_game(req: SimGameReq):
         difficulty=s.get("difficulty", "balanced"),
         custom_rosters={game["home"]: _team_roster_with_trades(s, game["home"]),
                         game["away"]: _team_roster_with_trades(s, game["away"])},
+        coaching=_coaching(s),
     )
     if game["played"]:
         if game.get("log_id"):
@@ -257,6 +278,7 @@ async def sim_week(req: SimWeekReq):
             difficulty=s.get("difficulty", "balanced"),
             custom_rosters={g["home"]: _team_roster_with_trades(s, g["home"]),
                             g["away"]: _team_roster_with_trades(s, g["away"])},
+            coaching=_coaching(s),
             allow_ot=False,
         )
         g["played"] = True
@@ -268,11 +290,13 @@ async def sim_week(req: SimWeekReq):
             "season_id": req.season_id,
             "game_id": g["game_id"],
             "result": {
+                "home": g["home"], "away": g["away"],
                 "home_score": result["home_score"],
                 "away_score": result["away_score"],
                 "stats": result["stats"],
                 "player_stats": result["player_stats"],
                 "weather": result["weather"],
+                "plays": result["plays"],
             },
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -504,6 +528,7 @@ async def sim_playoff_game(req: PlayoffGameReq):
         difficulty=s.get("difficulty", "balanced"),
         custom_rosters={game["home"]: _team_roster_with_trades(s, game["home"]),
                         game["away"]: _team_roster_with_trades(s, game["away"])},
+        coaching=_coaching(s),
         allow_ot=True,
         roll_new_injuries=False,
     )
@@ -529,6 +554,122 @@ async def sim_playoff_game(req: PlayoffGameReq):
             g["weather"] = roll_weather(g["home"])
     await db.seasons.update_one({"id": req.season_id}, {"$set": {"playoffs": bracket}})
     return {"game": game, "result": result, "bracket": bracket}
+
+
+# ---------- Coaching Philosophy ----------
+@api.post("/season/coaching")
+async def set_coaching(req: CoachingReq):
+    if req.philosophy not in ("aggressive", "balanced", "conservative"):
+        raise HTTPException(400, "Invalid philosophy")
+    s = await _load_season(req.season_id)
+    coaching = s.get("coaching") or {}
+    coaching[req.team] = req.philosophy
+    await db.seasons.update_one({"id": req.season_id}, {"$set": {"coaching": coaching}})
+    return {"coaching": coaching}
+
+
+@api.get("/season/{season_id}/coaching")
+async def get_coaching(season_id: str):
+    s = await _load_season(season_id)
+    return {"coaching": s.get("coaching") or {}}
+
+
+# ---------- Franchise (multi-year) ----------
+@api.post("/season/next-year")
+async def next_year(req: NextYearReq):
+    s = await _load_season(req.season_id)
+    # Ensure playoffs done (super bowl champion set) or regular season done
+    playoffs = s.get("playoffs") or {}
+    champion = playoffs.get("champion")
+
+    # Compute new year data
+    changes = roll_franchise_year(s)
+    # Build franchise_rosters map for next season
+    new_rosters = {tid: c["roster"] for tid, c in changes.items()}
+    retirements = {tid: c["retired"] for tid, c in changes.items() if c["retired"]}
+    rookies = {tid: c["rookies"] for tid, c in changes.items()}
+
+    # Champions history: propagate + append this year's champion
+    history = list(s.get("champions_history") or [])
+    if champion:
+        history.append({"year": s.get("year", 2025), "team": champion})
+    franchise_id = s.get("franchise_id") or s["id"]
+    next_year_num = (s.get("year") or 2025) + 1
+
+    # Create new season doc
+    new_season_id = str(uuid.uuid4())
+    schedule = generate_schedule(new_season_id, weeks=18)
+    for g in schedule:
+        g["weather"] = roll_weather(g["home"])
+    new_doc = {
+        "id": new_season_id,
+        "user_team": s["user_team"],
+        "year": next_year_num,
+        "difficulty": s.get("difficulty", "balanced"),
+        "schedule": schedule,
+        "current_week": 1,
+        "depth_charts": {},
+        "injuries": {},
+        "trades": [],
+        "trade_players": {},
+        "trade_removed": {},
+        "playoffs": None,
+        "coaching": s.get("coaching") or {},
+        "franchise_id": franchise_id,
+        "prev_season_id": s["id"],
+        "franchise_rosters": new_rosters,
+        "champions_history": history,
+        "last_year_retirements": retirements,
+        "last_year_rookies": rookies,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.seasons.insert_one(new_doc)
+    new_doc.pop("_id", None)
+    return {
+        "new_season_id": new_season_id,
+        "retirements": retirements,
+        "rookies": rookies,
+        "champions_history": history,
+        "year": next_year_num,
+    }
+
+
+@api.get("/season/{season_id}/franchise")
+async def franchise_summary(season_id: str):
+    s = await _load_season(season_id)
+    return {
+        "franchise_id": s.get("franchise_id") or s["id"],
+        "year": s.get("year", 2025),
+        "champions_history": s.get("champions_history") or [],
+        "last_year_retirements": s.get("last_year_retirements") or {},
+        "last_year_rookies": s.get("last_year_rookies") or {},
+    }
+
+
+# ---------- Game log (public share) ----------
+@api.get("/game-log/{log_id}/share")
+async def share_game(log_id: str):
+    log = await db.game_logs.find_one({"id": log_id}, {"_id": 0})
+    if not log:
+        raise HTTPException(404, "Log not found")
+    result = log.get("result", {})
+    plays = result.get("plays", [])
+    # Top plays: scoring events + biggest gains
+    top = []
+    for p in plays:
+        if p.get("result") in ("TD", "FG_GOOD", "INT", "FUMBLE") or p.get("yards", 0) >= 25:
+            top.append(p)
+    top = top[:12]
+    return {
+        "log_id": log_id,
+        "home": result.get("home"),
+        "away": result.get("away"),
+        "home_score": result.get("home_score"),
+        "away_score": result.get("away_score"),
+        "stats": result.get("stats"),
+        "weather": result.get("weather"),
+        "top_plays": top,
+    }
 
 
 app.include_router(api)

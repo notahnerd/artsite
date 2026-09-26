@@ -8,7 +8,8 @@ export default function Nav({ seasonId, userTeam }) {
         { path: `/season/${seasonId}`, label: "Season", tid: "nav-season-tab" },
         { path: `/season/${seasonId}/leaders`, label: "Leaders", tid: "nav-leaders-tab" },
         { path: `/season/${seasonId}/playoffs`, label: "Playoffs", tid: "nav-playoffs-tab" },
-        { path: `/season/${seasonId}/chart`, label: "Player Cards", tid: "nav-chart-tab" },
+        { path: `/season/${seasonId}/franchise`, label: "Franchise", tid: "nav-franchise-tab" },
+        { path: `/season/${seasonId}/chart`, label: "Cards", tid: "nav-chart-tab" },
       ]
     : [];
   return (

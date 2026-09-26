@@ -51,22 +51,27 @@ def roll_2d6() -> Tuple[int, int]:
     return random.randint(1, 6), random.randint(1, 6)
 
 
-def choose_play_type(down, distance, ball_on, score_diff, quarter, clock):
+def choose_play_type(down, distance, ball_on, score_diff, quarter, clock, philosophy="balanced"):
     yards_to_goal = 100 - ball_on
+    aggro = {"aggressive": 0.15, "balanced": 0.0, "conservative": -0.10}.get(philosophy, 0.0)
     if down == 4:
-        if yards_to_goal <= 35:
+        # aggressive coaches go for it more often; conservative kicks/punts
+        go_for_it_boost = {"aggressive": 15, "balanced": 0, "conservative": -8}.get(philosophy, 0)
+        if yards_to_goal <= 35 - go_for_it_boost // 3:
             return "FG"
-        if distance <= 2 and ball_on > 55:
+        threshold_dist = 2 + (2 if philosophy == "aggressive" else 0)
+        threshold_ball = 55 - (10 if philosophy == "aggressive" else 0)
+        if distance <= threshold_dist and ball_on > threshold_ball:
             return "RUN" if random.random() < 0.5 else "PASS"
         return "PUNT"
-    pass_prob = 0.55
+    pass_prob = 0.55 + aggro
     if score_diff < -7 and quarter >= 3:
-        pass_prob = 0.80
+        pass_prob = 0.82 + aggro / 2
     if distance >= 8:
-        pass_prob = min(0.85, pass_prob + 0.15)
+        pass_prob = min(0.90, pass_prob + 0.15)
     if distance <= 2:
-        pass_prob = 0.35
-    return "PASS" if random.random() < pass_prob else "RUN"
+        pass_prob = 0.35 + aggro
+    return "PASS" if random.random() < max(0.15, min(0.9, pass_prob)) else "RUN"
 
 
 def _pick_receiver(players: List[Dict]) -> Dict:
@@ -118,7 +123,7 @@ def _add_player_stat(pstats, player, key, val):
     entry[key] = entry.get(key, 0) + val
 
 
-def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1.0):
+def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1.0, coaching=None):
     off_id = state["possession"]
     def_id = state["home"] if off_id == state["away"] else state["away"]
     off_team = teams[off_id]
@@ -128,7 +133,8 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
 
     down, distance, ball_on = state["down"], state["distance"], state["ball_on"]
     score_diff = state[f"{off_id}_score"] - state[f"{def_id}_score"]
-    play_type = choose_play_type(down, distance, ball_on, score_diff, state["quarter"], state["clock"])
+    phil = (coaching or {}).get(off_id, "balanced")
+    play_type = choose_play_type(down, distance, ball_on, score_diff, state["quarter"], state["clock"], phil)
 
     d1, d2 = roll_2d6()
     roll = d1 + d2
@@ -281,8 +287,31 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
     if new_ball >= 100:
         event["yards"] = 100 - ball_on
         event["result"] = "TD"
-        event["score_change"] = {"team": off_id, "points": 7}
-        event["description"] = f"TOUCHDOWN {off_team['name']}! {event['description']}"
+        # Coaching: aggressive tries 2pt on the right differentials
+        phil = (coaching or {}).get(off_id, "balanced")
+        cur_score = state[f"{off_id}_score"] + 6
+        opp_score = state[f"{def_id}_score"]
+        diff_after_xp = (cur_score + 1) - opp_score
+        two_pt = False
+        if phil == "aggressive":
+            # Try 2pt when trailing by 5,4,2,1 or leading by 1,2,4,5 etc.
+            if state["quarter"] >= 3 and diff_after_xp in (-4, -1, 2, 5):
+                two_pt = True
+            if state["quarter"] == 4 and abs(diff_after_xp) <= 2 and random.random() < 0.5:
+                two_pt = True
+        points = 6
+        if two_pt:
+            # 2pt conversion ~50%
+            if random.random() < 0.5:
+                points = 8
+                event["description"] = f"TOUCHDOWN {off_team['name']}! {event['description']} 2-PT CONVERSION GOOD."
+            else:
+                points = 6
+                event["description"] = f"TOUCHDOWN {off_team['name']}! {event['description']} 2-PT NO GOOD."
+        else:
+            points = 7  # includes assumed good XP
+            event["description"] = f"TOUCHDOWN {off_team['name']}! {event['description']}"
+        event["score_change"] = {"team": off_id, "points": points}
         # Attribute TD
         if play_type == "PASS":
             _add_player_stat(pstats, qb, "pass_td", 1)
@@ -291,7 +320,7 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
             _add_player_stat(pstats, rec, "rec_td", 1)
         else:
             _add_player_stat(pstats, rb, "rush_td", 1)
-        state[f"{off_id}_score"] += 7
+        state[f"{off_id}_score"] += points
         _score_flip(state, def_id)
         _advance_clock(state, 20)
         return event
@@ -382,12 +411,13 @@ def _apply_starters_override(all_players: List[Dict], depth_chart: Optional[Dict
 
 def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None,
                        injuries=None, difficulty="arcade", allow_ot=True,
-                       roll_new_injuries=True, custom_rosters=None) -> Dict:
+                       roll_new_injuries=True, custom_rosters=None, coaching=None) -> Dict:
     from nfl_data import TEAMS
     teams = {t["id"]: t for t in TEAMS}
     depth_charts = depth_charts or {}
     injuries = injuries or {}
     custom_rosters = custom_rosters or {}
+    coaching = coaching or {}
     mult = DIFFICULTY_MULT.get(difficulty, 1.0)
 
     def _roster(tid):
@@ -408,7 +438,7 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
     max_plays = 220
 
     while state["quarter"] <= 4 and len(plays) < max_plays:
-        ev = simulate_play(state, teams, players, weather_code, pstats, mult)
+        ev = simulate_play(state, teams, players, weather_code, pstats, mult, coaching)
         plays.append(ev)
         _accumulate_stats(stats, ev)
 
@@ -419,7 +449,7 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
         state["quarter"] = 5
         ot_plays = 0
         while ot_plays < 40:
-            ev = simulate_play(state, teams, players, weather_code, pstats, mult)
+            ev = simulate_play(state, teams, players, weather_code, pstats, mult, coaching)
             plays.append(ev)
             _accumulate_stats(stats, ev)
             ot_plays += 1
@@ -445,6 +475,7 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
         "player_stats": pstats,
         "weather": weather_code,
         "difficulty": difficulty,
+        "coaching": coaching,
         "new_injuries": new_injuries,
     }
 

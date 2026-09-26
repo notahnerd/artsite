@@ -9,6 +9,8 @@ import PlayByPlay from "@/components/PlayByPlay";
 import BoxScore from "@/components/BoxScore";
 import Dice from "@/components/Dice";
 import WeatherBadge from "@/components/WeatherBadge";
+import InjuryTicker from "@/components/InjuryTicker";
+import { Share2 } from "lucide-react";
 
 export default function Game({ playoff = false }) {
   const { id, gameId } = useParams();
@@ -48,6 +50,8 @@ export default function Game({ playoff = false }) {
         : await simGame(id, gameId);
       const plays = result?.result?.plays || [];
       setPlayLog(plays);
+      // Update game with new log_id from server so share link works
+      if (result?.game) setGame((prev) => ({ ...prev, ...result.game }));
       // Set initial pre-play state
       setState({
         home: g.home, away: g.away,
@@ -122,6 +126,7 @@ export default function Game({ playoff = false }) {
     <div className="min-h-screen">
       <Nav seasonId={id} userTeam={season?.user_team} />
       <div className="max-w-[1500px] mx-auto px-3 lg:px-6 py-4 md:py-6 space-y-4">
+        <InjuryTicker seasonId={id} teamsById={teamsById} />
         {game.weather && (
           <div className="flex items-center gap-2">
             <WeatherBadge code={game.weather} size="lg" />
@@ -172,13 +177,28 @@ export default function Game({ playoff = false }) {
                 </button>
               </div>
               {finished && (
-                <button
-                  onClick={() => nav(playoff ? `/season/${id}/playoffs` : `/season/${id}`)}
-                  data-testid="back-to-season-btn"
-                  className="mt-3 w-full px-4 py-2 rounded-md bg-white/5 hover:bg-white/10 text-slate-100 font-mono uppercase tracking-widest text-xs border border-white/10"
-                >
-                  {playoff ? "Back to Bracket →" : "Back to Season →"}
-                </button>
+                <>
+                  <button
+                    onClick={() => nav(playoff ? `/season/${id}/playoffs` : `/season/${id}`)}
+                    data-testid="back-to-season-btn"
+                    className="mt-3 w-full px-4 py-2 rounded-md bg-white/5 hover:bg-white/10 text-slate-100 font-mono uppercase tracking-widest text-xs border border-white/10"
+                  >
+                    {playoff ? "Back to Bracket →" : "Back to Season →"}
+                  </button>
+                  {game.log_id && (
+                    <button
+                      onClick={() => {
+                        const url = `${window.location.origin}/share/game/${game.log_id}`;
+                        navigator.clipboard.writeText(url);
+                        toast.success("Recap link copied to clipboard!");
+                      }}
+                      data-testid="share-game-btn"
+                      className="mt-2 w-full px-4 py-2 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-mono uppercase tracking-widest text-xs border border-cyan-500/40 flex items-center justify-center gap-1.5"
+                    >
+                      <Share2 size={12} /> Copy Recap Link
+                    </button>
+                  )}
+                </>
               )}
             </div>
             <BoxScore stats={stats} home={home} away={away} />
