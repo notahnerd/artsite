@@ -69,3 +69,18 @@ NFL football simulation game with dice rolls and chart-based outcomes using real
 
 ## Bug Fixes
 - 2026-02-26 — Home.jsx create-season flow bypassed the createSeason() wrapper, so the returned owner_token was never persisted; every new UI-created season failed sim-game with 403 ("loading error"). Fixed by importing saveOwnerToken and calling it after api.post('/season/create').
+
+
+### Custom Flippy Deck (v6.1 - 2026-02-26)
+- **Franchise-scoped deck builder unlocked after 2 completed seasons** (`champions_history` length >= 2).
+- **4 yardage-skew presets**: Balanced, Power Run (grind), Air Raid (boom/bust), Chaos (-10..+80).
+- **Up to 3 signature cards**, each label (24 char) + yards (clamp -10..+60) + count (1-3). Signature cards replace DICE cards so deck stays at 250.
+- **Config persists on season doc** as `deck_config` and is inherited by future seasons via `/api/season/next-year`.
+- **API**: `GET /api/season/{id}/deck-config` (public read), `POST /api/season/deck-config` (owner-token required, 403 when locked, 400 on invalid preset).
+- **Frontend**: `DeckBuilder.jsx` dialog opened from Season page's "Flippy Deck" button. Locked state shows seasons-played count; unlocked shows preset picker + signature editor + save.
+- **FlippyDeck.jsx** now renders a distinct "SIGNATURE CARD" face (fuchsia) with the manager's custom label when a signature card is flipped; play toast fires on signature draws.
+
+## Files Added
+- /app/backend/flippy_deck.py (updated with SKEW_PRESETS + _sanitize_signature_cards + config-aware _build_cards)
+- /app/frontend/src/components/DeckBuilder.jsx
+- /app/backend/tests/test_deck_config.py (8 pytest cases, all passing)
