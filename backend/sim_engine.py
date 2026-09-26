@@ -2,17 +2,17 @@
 Each play resolves through PLAYER CARDS (see player_cards.py):
 - Pass: QB card blended with target WR/TE card; team DEF adjusts
 - Run: RB card; team DEF adjusts
-Team ratings still act as tiebreakers via def_modifier inside cards.
+- Weather modifies pass yardage, INT/big-play chance and kicking
+- Depth chart overrides QB/RB/K if provided
 """
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 from nfl_data import get_team, get_players
-from player_cards import resolve_pass, resolve_run, qb_card, rb_card
+from player_cards import resolve_pass, resolve_run
+from weather import WEATHER_TYPES
 
 
-# ---- Chart: base yards by 2D6 roll for RUN and PASS ----
-# This is the visible chart the user can inspect.
 RUN_CHART = {
     2: {"yards": -4, "event": "TFL"},
     3: {"yards": -1, "event": "NORMAL"},
@@ -45,28 +45,17 @@ def roll_2d6() -> Tuple[int, int]:
     return random.randint(1, 6), random.randint(1, 6)
 
 
-def rating_modifier(off_rating: int, def_rating: int) -> int:
-    """Returns modifier to yards. Every 8 rating diff = +/-1 yard base scaling."""
-    return round((off_rating - def_rating) / 8)
-
-
-def choose_play_type(down: int, distance: int, ball_on: int, score_diff: int) -> str:
-    """Simple AI to pick play type.
-    ball_on: yards from own goal line (0-100), so ball_on=75 means at opp 25.
-    """
+def choose_play_type(down, distance, ball_on, score_diff, quarter, clock):
     yards_to_goal = 100 - ball_on
-    # 4th down logic
     if down == 4:
         if yards_to_goal <= 35:
             return "FG"
-        if distance <= 2 and ball_on > 50:
-            # go for it (rare)
+        if distance <= 2 and ball_on > 55:
             return "RUN" if random.random() < 0.5 else "PASS"
         return "PUNT"
-    # Late game trailing -> pass more
     pass_prob = 0.55
-    if score_diff < -7:
-        pass_prob = 0.75
+    if score_diff < -7 and quarter >= 3:
+        pass_prob = 0.80
     if distance >= 8:
         pass_prob = min(0.85, pass_prob + 0.15)
     if distance <= 2:
@@ -75,16 +64,55 @@ def choose_play_type(down: int, distance: int, ball_on: int, score_diff: int) ->
 
 
 def _pick_receiver(players: List[Dict]) -> Dict:
-    """Weighted pick between WRs and TE."""
-    pool = [p for p in players if p["pos"] in ("WR", "TE", "RB")]
+    pool = [p for p in players if p.get("starter") and p["pos"] in ("WR", "TE", "RB")]
+    if not pool:
+        pool = [p for p in players if p["pos"] in ("WR", "TE", "RB")]
     if not pool:
         return {"name": "Receiver"}
     weights = [(p["ovr"] - 65) ** 2 for p in pool]
     return random.choices(pool, weights=weights, k=1)[0]
 
 
-def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
-    """Simulate one play. Mutates state and returns event dict."""
+def _pick_defender(def_players):
+    dfs = [p for p in def_players if p["pos"] not in ("QB", "RB", "WR", "TE", "K")]
+    if not dfs:
+        return {"name": "Defender"}
+    weights = [(p["ovr"] - 65) ** 2 for p in dfs]
+    return random.choices(dfs, weights=weights, k=1)[0]
+
+
+def _apply_weather_pass(yards: int, result: str, weather_code: str) -> Tuple[int, str]:
+    w = WEATHER_TYPES.get(weather_code, WEATHER_TYPES["CLEAR"])
+    # Scale yardage
+    if yards > 0:
+        mult = w["pass_mult"]
+        if result in ("BIG_PLAY", "DEEP_BOMB"):
+            mult *= w["big_play_mult"]
+        yards = max(0, int(round(yards * mult)))
+    # INT bonus on 2/3 roll
+    if w["int_bonus"] > 0 and result == "SACK" and random.random() < 0.25:
+        result = "INT"
+    if w["int_bonus"] < 0 and result == "INT" and random.random() < 0.35:
+        result = "INCOMPLETE"
+    return yards, result
+
+
+def _add_player_stat(pstats, player, key, val):
+    if not player or not player.get("name"):
+        return
+    entry = pstats.setdefault(player["name"], {
+        "name": player["name"],
+        "team": player.get("team", ""),
+        "pos": player.get("pos", ""),
+        "pass_yds": 0, "pass_td": 0, "int": 0,
+        "rush_yds": 0, "rush_td": 0, "carries": 0,
+        "rec": 0, "rec_yds": 0, "rec_td": 0, "targets": 0,
+        "fgm": 0, "fga": 0, "sacks": 0, "picks": 0,
+    })
+    entry[key] = entry.get(key, 0) + val
+
+
+def simulate_play(state, teams, players, weather_code, pstats):
     off_id = state["possession"]
     def_id = state["home"] if off_id == state["away"] else state["away"]
     off_team = teams[off_id]
@@ -92,49 +120,34 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
     off_players = players[off_id]
     def_players = players[def_id]
 
-    down = state["down"]
-    distance = state["distance"]
-    ball_on = state["ball_on"]  # 0-100, 0 = own goal, 100 = opp goal
+    down, distance, ball_on = state["down"], state["distance"], state["ball_on"]
     score_diff = state[f"{off_id}_score"] - state[f"{def_id}_score"]
-
-    play_type = choose_play_type(down, distance, ball_on, score_diff)
+    play_type = choose_play_type(down, distance, ball_on, score_diff, state["quarter"], state["clock"])
 
     d1, d2 = roll_2d6()
     roll = d1 + d2
 
-    event = {
-        "quarter": state["quarter"],
-        "clock": state["clock"],
-        "off": off_id,
-        "def": def_id,
-        "down": down,
-        "distance": distance,
-        "ball_on": ball_on,
-        "play_type": play_type,
-        "dice": [d1, d2],
-        "roll": roll,
-        "yards": 0,
-        "result": "NORMAL",
-        "description": "",
-        "score_change": None,
-        "turnover": False,
-    }
+    # Pick starters
+    qb = next((p for p in off_players if p.get("starter") and p["pos"] == "QB"), {"name": "QB", "ovr": 75})
+    rb = next((p for p in off_players if p.get("starter") and p["pos"] == "RB"), {"name": "RB", "ovr": 75})
+    kicker = next((p for p in off_players if p.get("starter") and p["pos"] == "K"), {"name": "K", "ovr": 80})
 
-    qb = next((p for p in off_players if p["pos"] == "QB"), {"name": "QB"})
-    rb = next((p for p in off_players if p["pos"] == "RB"), {"name": "RB"})
-    kicker = next((p for p in off_players if p["pos"] == "K"), {"name": "K", "ovr": 80})
+    event = {
+        "quarter": state["quarter"], "clock": state["clock"],
+        "off": off_id, "def": def_id,
+        "down": down, "distance": distance, "ball_on": ball_on,
+        "play_type": play_type, "dice": [d1, d2], "roll": roll,
+        "yards": 0, "result": "NORMAL", "description": "",
+        "score_change": None, "turnover": False,
+    }
 
     if play_type == "PUNT":
         punt_dist = random.randint(38, 55)
         new_ball = max(20, min(95, ball_on + punt_dist))
-        # touchback logic
-        if new_ball >= 100:
-            new_ball_flipped = 100 - 75  # touchback -> other team at own 25
-        else:
-            new_ball_flipped = 100 - new_ball
+        new_ball_flipped = 100 - 75 if new_ball >= 100 else 100 - new_ball
         event["yards"] = punt_dist
         event["result"] = "PUNT"
-        event["description"] = f"{off_team['name']} punt {punt_dist} yards. {def_team['name']} takes over."
+        event["description"] = f"{off_team['name']} punt {punt_dist} yards."
         state["possession"] = def_id
         state["ball_on"] = new_ball_flipped
         state["down"] = 1
@@ -145,24 +158,23 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
     if play_type == "FG":
         yards_to_goal = 100 - ball_on
         fg_distance = yards_to_goal + 17
-        # success chance based on kicker OVR and distance
         base = max(0.35, (kicker.get("ovr", 80) - 60) / 40)
-        if fg_distance <= 35:
-            chance = base + 0.35
-        elif fg_distance <= 45:
-            chance = base + 0.15
-        elif fg_distance <= 55:
-            chance = base - 0.05
-        else:
-            chance = base - 0.25
-        chance = max(0.15, min(0.98, chance))
+        if fg_distance <= 35: chance = base + 0.35
+        elif fg_distance <= 45: chance = base + 0.15
+        elif fg_distance <= 55: chance = base - 0.05
+        else: chance = base - 0.25
+        # weather kicking penalty (penalty in %)
+        chance -= WEATHER_TYPES.get(weather_code, WEATHER_TYPES["CLEAR"])["fg_penalty"] / 100.0
+        chance = max(0.12, min(0.98, chance))
         success = random.random() < chance
         event["yards"] = fg_distance
+        _add_player_stat(pstats, kicker, "fga", 1)
         if success:
             event["result"] = "FG_GOOD"
             event["score_change"] = {"team": off_id, "points": 3}
             event["description"] = f"{kicker['name']} nails a {fg_distance}-yard field goal! GOOD."
             state[f"{off_id}_score"] += 3
+            _add_player_stat(pstats, kicker, "fgm", 1)
             _score_flip(state, def_id)
         else:
             event["result"] = "FG_MISS"
@@ -174,21 +186,24 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
         _advance_clock(state, 10)
         return event
 
-    # RUN or PASS - resolve via player cards
     if play_type == "RUN":
         yards, result = resolve_run(rb, def_team, roll)
+        _add_player_stat(pstats, rb, "carries", 1)
     else:
         receiver = _pick_receiver(off_players)
         yards, result = resolve_pass(qb, receiver, def_team, roll)
+        yards, result = _apply_weather_pass(yards, result, weather_code)
         event["target"] = receiver.get("name")
+        _add_player_stat(pstats, receiver, "targets", 1)
 
-    # Special outcomes
     if result == "INT":
         event["turnover"] = True
         event["yards"] = 0
         event["result"] = "INT"
         picker = _pick_defender(def_players)
         event["description"] = f"INTERCEPTED! {picker['name']} picks off {qb['name']}."
+        _add_player_stat(pstats, qb, "int", 1)
+        _add_player_stat(pstats, picker, "picks", 1)
         state["possession"] = def_id
         state["ball_on"] = 100 - min(95, ball_on + random.randint(-5, 25))
         state["down"] = 1
@@ -201,6 +216,7 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
     if result == "SACK":
         sacker = _pick_defender(def_players)
         event["description"] = f"SACK! {sacker['name']} drops {qb['name']} for {abs(yards)} yards."
+        _add_player_stat(pstats, sacker, "sacks", 1)
     if result == "INCOMPLETE":
         event["description"] = f"Pass by {qb['name']} INCOMPLETE."
         yards = 0
@@ -208,7 +224,7 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
         event["description"] = f"DROP! {event.get('target','Receiver')} can't hang on to {qb['name']}'s pass."
         yards = 0
 
-    # Fumble chance on positive plays
+    # Fumble chance
     if result == "NORMAL" and yards > 0 and random.random() < 0.03:
         event["turnover"] = True
         event["result"] = "FUMBLE"
@@ -221,11 +237,19 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
         _advance_clock(state, 8)
         return event
 
-    # apply yards
     new_ball = ball_on + yards
     event["yards"] = yards
 
-    # Description for normal plays
+    # Passing/receiving stats accrual
+    if play_type == "PASS" and result in ("NORMAL", "BIG_PLAY", "DEEP_BOMB") and yards > 0:
+        _add_player_stat(pstats, qb, "pass_yds", yards)
+        rec_name = event.get("target")
+        rec = next((p for p in off_players if p["name"] == rec_name), None)
+        _add_player_stat(pstats, rec, "rec", 1)
+        _add_player_stat(pstats, rec, "rec_yds", yards)
+    if play_type == "RUN" and yards > 0:
+        _add_player_stat(pstats, rb, "rush_yds", yards)
+
     if not event["description"]:
         if play_type == "RUN":
             desc = f"{rb['name']} runs "
@@ -244,20 +268,25 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
         event["description"] = desc
         event["result"] = "BIG_PLAY" if yards >= 20 else "NORMAL"
 
-    # TD?
     if new_ball >= 100:
         event["yards"] = 100 - ball_on
         event["result"] = "TD"
-        event["score_change"] = {"team": off_id, "points": 7}  # includes XP assumed good
+        event["score_change"] = {"team": off_id, "points": 7}
         event["description"] = f"TOUCHDOWN {off_team['name']}! {event['description']}"
+        # Attribute TD
+        if play_type == "PASS":
+            _add_player_stat(pstats, qb, "pass_td", 1)
+            rec_name = event.get("target")
+            rec = next((p for p in off_players if p["name"] == rec_name), None)
+            _add_player_stat(pstats, rec, "rec_td", 1)
+        else:
+            _add_player_stat(pstats, rb, "rush_td", 1)
         state[f"{off_id}_score"] += 7
         _score_flip(state, def_id)
         _advance_clock(state, 20)
         return event
 
     state["ball_on"] = max(1, new_ball)
-
-    # First down?
     if yards >= distance:
         state["down"] = 1
         state["distance"] = 10
@@ -265,7 +294,6 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
         state["down"] += 1
         state["distance"] = distance - yards
         if state["down"] > 4:
-            # turnover on downs
             state["possession"] = def_id
             state["ball_on"] = 100 - state["ball_on"]
             state["down"] = 1
@@ -277,79 +305,111 @@ def simulate_play(state: Dict, teams: Dict, players: Dict) -> Dict:
     return event
 
 
-def _pick_defender(def_players):
-    dfs = [p for p in def_players if p["pos"] not in ("QB", "RB", "WR", "TE", "K")]
-    if not dfs:
-        return {"name": "Defender"}
-    weights = [(p["ovr"] - 65) ** 2 for p in dfs]
-    return random.choices(dfs, weights=weights, k=1)[0]
-
-
 def _score_flip(state, receiving_team):
-    """After a score, kickoff to the other team, place them at own 25."""
     state["possession"] = receiving_team
     state["ball_on"] = 25
     state["down"] = 1
     state["distance"] = 10
 
 
-def _advance_clock(state, seconds: int):
+def _advance_clock(state, seconds):
     state["clock"] -= seconds
     if state["clock"] <= 0:
         state["clock"] = 0
         state["quarter"] += 1
         if state["quarter"] <= 4:
-            state["clock"] = 900  # 15 min
+            state["clock"] = 900
             if state["quarter"] == 3:
-                # halftime kickoff
                 state["possession"] = state["halftime_receiver"]
                 state["ball_on"] = 25
                 state["down"] = 1
                 state["distance"] = 10
 
 
-def new_game_state(home_id: str, away_id: str) -> Dict:
-    # coin flip: away receives first, home receives at halftime (traditional)
-    first_receiver = away_id
-    halftime_receiver = home_id
+def new_game_state(home_id, away_id):
     return {
-        "home": home_id,
-        "away": away_id,
-        f"{home_id}_score": 0,
-        f"{away_id}_score": 0,
-        "quarter": 1,
-        "clock": 900,
-        "down": 1,
-        "distance": 10,
-        "ball_on": 25,
-        "possession": first_receiver,
-        "halftime_receiver": halftime_receiver,
+        "home": home_id, "away": away_id,
+        f"{home_id}_score": 0, f"{away_id}_score": 0,
+        "quarter": 1, "clock": 900,
+        "down": 1, "distance": 10, "ball_on": 25,
+        "possession": away_id, "halftime_receiver": home_id,
         "plays": [],
     }
 
 
-def simulate_full_game(home_id: str, away_id: str) -> Dict:
-    from nfl_data import PLAYERS, TEAMS
+def _apply_starters_override(all_players: List[Dict], depth_chart: Optional[Dict]) -> List[Dict]:
+    """Depth chart is {pos: player_name}. Set starter flag accordingly."""
+    if not depth_chart:
+        return all_players
+    result = [dict(p) for p in all_players]
+    for pos, name in depth_chart.items():
+        # Reset all at that pos to non-starter
+        for p in result:
+            if p["pos"] == pos:
+                p["starter"] = False
+        # Mark selected
+        for p in result:
+            if p["name"] == name:
+                p["starter"] = True
+    return result
+
+
+def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None, allow_ot=True) -> Dict:
+    from nfl_data import TEAMS
     teams = {t["id"]: t for t in TEAMS}
-    players = PLAYERS
+    depth_charts = depth_charts or {}
+    players = {
+        home_id: _apply_starters_override(get_players(home_id), depth_charts.get(home_id)),
+        away_id: _apply_starters_override(get_players(away_id), depth_charts.get(away_id)),
+    }
+    # Tag team on players for stat attribution
+    for tid, plist in players.items():
+        for p in plist:
+            p["team"] = tid
+
     state = new_game_state(home_id, away_id)
     plays = []
     stats = {home_id: _empty_stats(), away_id: _empty_stats()}
-    max_plays = 200
+    pstats: Dict[str, Dict] = {}
+    max_plays = 220
+
     while state["quarter"] <= 4 and len(plays) < max_plays:
-        ev = simulate_play(state, teams, players)
+        ev = simulate_play(state, teams, players, weather_code, pstats)
         plays.append(ev)
-        _accumulate_stats(stats, ev, players)
-        if state["quarter"] > 4:
-            break
+        _accumulate_stats(stats, ev)
+
+    # Overtime for playoffs if tied
+    hs = state[f"{home_id}_score"]
+    as_ = state[f"{away_id}_score"]
+    if allow_ot and hs == as_:
+        # sudden score up to 40 more plays
+        state["clock"] = 600
+        state["quarter"] = 5
+        ot_plays = 0
+        start_scores = (hs, as_)
+        while ot_plays < 40:
+            ev = simulate_play(state, teams, players, weather_code, pstats)
+            plays.append(ev)
+            _accumulate_stats(stats, ev)
+            ot_plays += 1
+            hs2 = state[f"{home_id}_score"]
+            as2 = state[f"{away_id}_score"]
+            if hs2 != as2:
+                break
+        # if still tied, add +1 to the team with more yards (rare fallback for playoffs)
+        if state[f"{home_id}_score"] == state[f"{away_id}_score"]:
+            if stats[home_id]["total_yards"] >= stats[away_id]["total_yards"]:
+                state[f"{home_id}_score"] += 3
+            else:
+                state[f"{away_id}_score"] += 3
+
     return {
-        "home": home_id,
-        "away": away_id,
+        "home": home_id, "away": away_id,
         "home_score": state[f"{home_id}_score"],
         "away_score": state[f"{away_id}_score"],
-        "plays": plays,
-        "stats": stats,
-        "final_state": {k: v for k, v in state.items() if k != "plays"},
+        "plays": plays, "stats": stats,
+        "player_stats": pstats,
+        "weather": weather_code,
     }
 
 
@@ -361,18 +421,18 @@ def _empty_stats():
     }
 
 
-def _accumulate_stats(stats, ev, players):
+def _accumulate_stats(stats, ev):
     off = ev["off"]
     s = stats[off]
     s["plays"] += 1
     if ev["result"] == "SACK":
         s["sacks_allowed"] += 1
         s["pass_yards"] += ev["yards"]
-    elif ev["play_type"] == "PASS" and ev["result"] not in ("INT", "INCOMPLETE"):
+    elif ev["play_type"] == "PASS" and ev["result"] not in ("INT", "INCOMPLETE", "DROP"):
         s["pass_yards"] += ev["yards"]
     elif ev["play_type"] == "RUN":
         s["rush_yards"] += ev["yards"]
-    if ev["result"] not in ("PUNT", "FG_GOOD", "FG_MISS", "INCOMPLETE", "INT"):
+    if ev["result"] not in ("PUNT", "FG_GOOD", "FG_MISS", "INCOMPLETE", "INT", "DROP"):
         s["total_yards"] += ev["yards"]
     if ev["turnover"]:
         s["turnovers"] += 1

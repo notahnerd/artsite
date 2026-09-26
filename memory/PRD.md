@@ -1,49 +1,34 @@
 # Gridiron Roller - Tabletop NFL Simulator
 
 ## Original Problem
-A NFL football simulation game with chart results and dice roll. Real player ratings and stats.
-Feature request (2026-02): Strat-O-Matic style — every player has their own card/chart based on their abilities.
+NFL football simulation game with chart results and dice roll. Real player ratings and stats.
 
-## User Choices
-- Season Mode: Manage a team across a full 18-week season
-- Simulation: Dice roll (2D6) + Strat-O-Matic style PLAYER CARDS
-- Data: Curated 2025 NFL seed data (32 teams, 7 star players each)
-- Features: Play-by-play, dice rolls, live scoreboard, box score, stats, player card viewer
-- Style: Bold stadium/broadcast dark theme with team colors, tabletop dice
+## Implemented Features
+
+### Core (v1)
+- 32 NFL teams w/ 2025 ratings, 7 star players each + auto-generated backups
+- 18-week randomized season schedule
+- Strat-O-Matic style Player Cards (QB/RB/WR/TE/DEF) — every player has a 2D6 chart
+- Animated Game screen: scoreboard, field w/ ball & line markers, dice, play-by-play, box score
+- Real-time toasts for TD/INT/FUMBLE/FG
+- Player Card Vault w/ per-team browsing and stats bars
+
+### Postseason & Depth (v2 - 2026-02)
+- **Playoff Bracket**: 14-team bracket (7 seeds/conf), Wild Card / Divisional / Conf / Super Bowl w/ auto-advancement + OT
+- **Stat Leaders**: cumulative passing/rushing/receiving/sacks across whole season
+- **Depth Chart**: choose QB/RB/K starter — backup cards shift game outcomes
+- **Weather**: per-game weather roll (Clear/Rain/Snow/Wind/Dome) that modifies pass card yardage, INT rate, big play chance, and FG kicking
 
 ## Architecture
-- Backend: FastAPI + Motor (async MongoDB)
-  - /api/teams, /api/teams/{id}
-  - /api/team-cards/{team_id} - all player cards for a team
-  - /api/player-card?team&name - single player card
-  - /api/season/create, /api/season/{id}
-  - /api/season/sim-game, /api/season/sim-week
-  - /api/chart - reference charts
-- Player Cards (player_cards.py):
-  - QB card: 2-12 outcomes (INT/SACK/INCOMPLETE/NORMAL/BIG_PLAY/DEEP_BOMB), styles: gunslinger/balanced/game-manager
-  - RB card: styles power/all-purpose/speed
-  - WR/TE card: YAC bonus per roll + drop chance
-  - Ratings skew yardage; team DEF adjusts final
-- Frontend: React + shadcn/ui + Sonner toasts
-  - Home: team selection grid by AFC/NFC divisions
-  - Season: schedule, standings, roster (click players → card modal)
-  - Game: scoreboard, animated field, dice, play-by-play, box score
-  - Player Cards Vault: team picker + 3-col card grid with mini bar charts
-
-## Implemented (2026-02)
-- 32 team seed w/ realistic 2025 ratings and 7 star players each
-- Season creation with 18-week randomized schedule
-- Deterministic simulation engine using per-player cards
-- Interactive Game screen with dice animation and Auto-sim
-- Play-by-play cards, animated dice/ball, sonner toasts for TD/INT/FUMBLE/FG
-- Standings, real-time box score, roster
-- Player Card modal (accessible from Season roster or Player Cards Vault)
-- Player Cards Vault page with all 32 teams
+- Backend: FastAPI + Motor MongoDB
+  - Modules: nfl_data, player_cards, sim_engine, season, playoffs, weather
+  - Endpoints: /api/teams, /api/team-cards, /api/player-card, /api/season/*, /api/season/depth-chart, /api/season/{id}/leaders, /api/season/{id}/start-playoffs, /api/season/playoff-game
+- Frontend: React + shadcn/ui + Sonner
+  - Pages: Home, Season, Game (regular+playoff), Chart, LeadersPage, Playoffs
+  - Components: Scoreboard, Field, Dice, PlayByPlay, BoxScore, PlayerCard, DepthChartDialog, WeatherBadge, Leaders
 
 ## Backlog / Next
-- P1: Playoffs & Super Bowl bracket after Week 18
-- P1: Season-long player stat leaders (passing/rushing/receiving)
-- P2: Coaching decisions (4th down, timeouts, 2-point tries)
-- P2: Custom lineup/depth chart management
-- P2: Free agency + trade deadline
-- P2: Multi-season franchise mode (draft, contracts)
+- P1: Franchise mode across multiple seasons (draft, contracts)
+- P1: Player injuries and streaks
+- P2: Custom league creation with friends
+- P2: Coaching philosophy toggles (aggressive/conservative)

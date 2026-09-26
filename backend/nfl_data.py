@@ -91,5 +91,35 @@ def get_team(team_id: str):
     return None
 
 
+def _generate_backups(team_id: str, starters):
+    """Programmatically generate 4 backups: QB2, RB2, WR3, K2 (if roster has that pos)."""
+    seed = sum(ord(c) for c in team_id)
+    starters_by_pos = {p["pos"]: p for p in starters}
+    backups = []
+    templates = [
+        ("QB", ["Trey Smith", "Malik Cunningham", "Jake Fromm", "Carson Wentz", "Tim Boyle", "Jarrett Stidham", "Nick Mullens"]),
+        ("RB", ["Deuce Vaughn", "Zach Charbonnet", "Dameon Pierce", "Elijah Mitchell", "Kene Nwangwu", "Kendre Miller", "Tyler Allgeier"]),
+        ("WR", ["Isaiah Hodgins", "Simi Fehoko", "Trent Sherfield", "Kalif Raymond", "Tyler Boyd", "Rondale Moore", "Skyy Moore"]),
+        ("K", ["Riley Patterson", "Cade York", "Anders Carlson", "Eddy Pineiro", "Ryan Succop", "Dustin Hopkins", "Michael Badgley"]),
+    ]
+    for i, (pos, names) in enumerate(templates):
+        starter = starters_by_pos.get(pos)
+        if not starter:
+            continue
+        drop = 8 + (seed % 6)
+        backups.append({
+            "name": names[(seed + i) % len(names)],
+            "pos": pos,
+            "ovr": max(60, starter["ovr"] - drop),
+            "num": 30 + (seed + i * 7) % 60,
+            "starter": False,
+            "role": f"{pos}2",
+        })
+    return backups
+
+
 def get_players(team_id: str):
-    return PLAYERS.get(team_id, [])
+    starters = PLAYERS.get(team_id, [])
+    tagged = [{**p, "starter": True, "role": p["pos"]} for p in starters]
+    backups = _generate_backups(team_id, starters)
+    return tagged + backups

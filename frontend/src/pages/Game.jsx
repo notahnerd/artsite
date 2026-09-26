@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getSeason, getTeam, simGame } from "@/lib/api";
+import { getSeason, getTeam, simGame, api } from "@/lib/api";
 import { toast } from "sonner";
 import Nav from "@/components/Nav";
 import Scoreboard from "@/components/Scoreboard";
@@ -8,8 +8,9 @@ import Field from "@/components/Field";
 import PlayByPlay from "@/components/PlayByPlay";
 import BoxScore from "@/components/BoxScore";
 import Dice from "@/components/Dice";
+import WeatherBadge from "@/components/WeatherBadge";
 
-export default function Game() {
+export default function Game({ playoff = false }) {
   const { id, gameId } = useParams();
   const nav = useNavigate();
   const [teamsById, setTeamsById] = useState({});
@@ -30,14 +31,21 @@ export default function Game() {
     (async () => {
       const s = await getSeason(id);
       setSeason(s);
-      const g = s.schedule.find((x) => x.game_id === gameId);
+      let g;
+      if (playoff) {
+        g = s.playoffs?.games?.find((x) => x.id === gameId);
+      } else {
+        g = s.schedule.find((x) => x.game_id === gameId);
+      }
       setGame(g);
       const details = await Promise.all([g.home, g.away].map(getTeam));
       const map = {}; details.forEach((d) => { map[d.team.id] = d.team; });
       setTeamsById(map);
 
       // Full simulate once (we drive the reveal client-side for animation)
-      const result = await simGame(id, gameId);
+      const result = playoff
+        ? (await api.post("/season/playoff-game", { season_id: id, game_id: gameId })).data
+        : await simGame(id, gameId);
       const plays = result?.result?.plays || [];
       setPlayLog(plays);
       // Set initial pre-play state
@@ -114,6 +122,16 @@ export default function Game() {
     <div className="min-h-screen">
       <Nav seasonId={id} userTeam={season?.user_team} />
       <div className="max-w-[1500px] mx-auto px-3 lg:px-6 py-4 md:py-6 space-y-4">
+        {game.weather && (
+          <div className="flex items-center gap-2">
+            <WeatherBadge code={game.weather} size="lg" />
+            {playoff && (
+              <span className="px-3 py-1.5 rounded font-mono uppercase tracking-widest text-xs border bg-amber-500/20 text-amber-300 border-amber-500/40">
+                PLAYOFF • {game.id?.replace(/-/g, " ")}
+              </span>
+            )}
+          </div>
+        )}
         <Scoreboard state={state} home={home} away={away} />
         <Field state={state} home={home} away={away} />
 
@@ -155,11 +173,11 @@ export default function Game() {
               </div>
               {finished && (
                 <button
-                  onClick={() => nav(`/season/${id}`)}
+                  onClick={() => nav(playoff ? `/season/${id}/playoffs` : `/season/${id}`)}
                   data-testid="back-to-season-btn"
                   className="mt-3 w-full px-4 py-2 rounded-md bg-white/5 hover:bg-white/10 text-slate-100 font-mono uppercase tracking-widest text-xs border border-white/10"
                 >
-                  Back to Season →
+                  {playoff ? "Back to Bracket →" : "Back to Season →"}
                 </button>
               )}
             </div>

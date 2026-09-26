@@ -5,6 +5,8 @@ import Home from "@/pages/Home";
 import Season from "@/pages/Season";
 import Game from "@/pages/Game";
 import Chart from "@/pages/Chart";
+import Playoffs from "@/pages/Playoffs";
+import LeadersPage from "@/pages/LeadersPage";
 
 function App() {
   return (
@@ -14,7 +16,10 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/season/:id" element={<Season />} />
           <Route path="/season/:id/game/:gameId" element={<Game />} />
+          <Route path="/season/:id/playoff-game/:gameId" element={<Game playoff />} />
           <Route path="/season/:id/chart" element={<Chart />} />
+          <Route path="/season/:id/playoffs" element={<Playoffs />} />
+          <Route path="/season/:id/leaders" element={<LeadersPage />} />
         </Routes>
       </BrowserRouter>
       <Toaster

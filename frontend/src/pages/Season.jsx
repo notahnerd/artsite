@@ -4,6 +4,9 @@ import { getSeason, getTeam, simGame, simWeek } from "@/lib/api";
 import { toast } from "sonner";
 import Nav from "@/components/Nav";
 import PlayerCard from "@/components/PlayerCard";
+import WeatherBadge from "@/components/WeatherBadge";
+import DepthChartDialog from "@/components/DepthChartDialog";
+import { Settings } from "lucide-react";
 
 export default function Season() {
   const { id } = useParams();
@@ -12,6 +15,7 @@ export default function Season() {
   const [teamsById, setTeamsById] = useState({});
   const [roster, setRoster] = useState(null);
   const [simmingWeek, setSimmingWeek] = useState(false);
+  const [depthOpen, setDepthOpen] = useState(false);
 
   const load = async () => {
     const s = await getSeason(id);
@@ -30,7 +34,8 @@ export default function Season() {
 
   if (!season) return <div className="min-h-screen grid place-items-center text-slate-400 font-mono uppercase tracking-widest">Loading season…</div>;
 
-  const currentWeek = season.current_week;
+  const currentWeek = Math.min(18, season.current_week);
+  const isPlayoffsReady = season.schedule.every((g) => g.played);
   const weekGames = season.schedule.filter((g) => g.week === currentWeek);
   const userGame = weekGames.find((g) => g.home === season.user_team || g.away === season.user_team);
 
@@ -63,7 +68,16 @@ export default function Season() {
             <h1 className="font-display font-black uppercase text-3xl md:text-4xl">Season Command</h1>
           </div>
           <div className="flex items-center gap-2">
-            {userGame && !userGame.played && (
+            {isPlayoffsReady && (
+              <button
+                onClick={() => nav(`/season/${id}/playoffs`)}
+                data-testid="goto-playoffs-btn"
+                className="px-4 py-2 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-900 font-display font-black uppercase tracking-wider transition-colors"
+              >
+                Enter Playoffs →
+              </button>
+            )}
+            {userGame && !userGame.played && !isPlayoffsReady && (
               <button
                 data-testid="play-my-game-btn"
                 onClick={playUserGame}
@@ -72,14 +86,16 @@ export default function Season() {
                 Play My Game →
               </button>
             )}
-            <button
-              data-testid="sim-week-btn"
-              onClick={doSimWeek}
-              disabled={simmingWeek || currentWeek > 18}
-              className="px-4 py-2 rounded-md bg-white/10 hover:bg-white/15 text-slate-100 font-display font-bold uppercase tracking-wider text-sm border border-white/10 disabled:opacity-40 transition-colors"
-            >
-              {simmingWeek ? "Simming…" : "Sim Week (Auto)"}
-            </button>
+            {!isPlayoffsReady && (
+              <button
+                data-testid="sim-week-btn"
+                onClick={doSimWeek}
+                disabled={simmingWeek || currentWeek > 18}
+                className="px-4 py-2 rounded-md bg-white/10 hover:bg-white/15 text-slate-100 font-display font-bold uppercase tracking-wider text-sm border border-white/10 disabled:opacity-40 transition-colors"
+              >
+                {simmingWeek ? "Simming…" : "Sim Week (Auto)"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -132,6 +148,13 @@ export default function Season() {
                 <span>OFF <span className="text-amber-400 font-bold">{roster.team.off}</span></span>
                 <span>DEF <span className="text-amber-400 font-bold">{roster.team.def}</span></span>
                 <span>ST  <span className="text-amber-400 font-bold">{roster.team.st}</span></span>
+                <button
+                  onClick={() => setDepthOpen(true)}
+                  data-testid="open-depth-chart-btn"
+                  className="ml-2 px-3 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-900 font-display font-bold uppercase text-[10px] tracking-widest flex items-center gap-1"
+                >
+                  <Settings size={12} /> Depth Chart
+                </button>
               </div>
             </div>
             <table className="w-full text-sm" data-testid="roster-table">
@@ -163,6 +186,16 @@ export default function Season() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {roster?.team && (
+          <DepthChartDialog
+            seasonId={id}
+            team={roster.team}
+            open={depthOpen}
+            onOpenChange={setDepthOpen}
+            onSaved={load}
+          />
         )}
       </div>
     </div>
@@ -196,6 +229,11 @@ function GameRow({ game, teamsById, userTeam, onPlay }) {
             {game.played ? game.home_score : "-"}
           </span>
         </div>
+        {game.weather && (
+          <div className="mt-1.5">
+            <WeatherBadge code={game.weather} />
+          </div>
+        )}
       </div>
       {!game.played && (
         <button
