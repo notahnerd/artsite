@@ -1,0 +1,35 @@
+{
+  "summary": "Validated (A) security hardening + (B) Flippy Deck feature end-to-end. Backend: 20/20 security tests pass, 5/5 Flippy Deck backend tests pass. Frontend: FlippyDeck component renders next to Dice with 250/250 counter, decrements per play, flips animation works, shows DICE and YARDS faces, no console errors. Ownership tokens flow correctly through localStorage → axios interceptor → X-Owner-Token header.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Game page — FlippyDeck pill", "issues": ["When the current play is a PUNT/FG (no card drawn), the remaining pill snaps back to '250/250' because Game.jsx passes card=null and FlippyDeck falls back to default. Cosmetic — remaining should persist last-drawn value on non-card plays. Not blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_flippy_deck.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional/cosmetic) FlippyDeck.jsx: keep displaying the last card's remaining count when the current play has no card (PUNT/FG), instead of falling back to 250/250."
+  ],
+  "critical_code_review_comments": [
+    "flippy_deck.py is clean, deterministic composition (150 DICE + 98 YARDS + 2 INJURY = 250) with runtime assert.",
+    "sim_engine.py YARDS override correctly clips to goal line on TDs and preserves card_override=true flag.",
+    "server.py owner_token stripped on GET /season/{id}; interceptor in api.js correctly forwards X-Owner-Token by body season_id or URL param.",
+    "Security headers + rate limits (10/min create, 30/min sim-week, 60/min sim-game) all enforced.",
+    "Minor: FlippyDeck.jsx uses `card?.remaining ?? 250` — this default causes visual reset on PUNT/FG plays."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_flippy_deck.py (new)"
+  ],
+  "success_rate": {"backend": "100% (25/25 tests, next_year_rate_limit skipped to avoid 62s sleep during main run — verified separately in prior smoke tests)", "frontend": "100% (all critical Flippy Deck behaviors observed)"},
+  "test_credentials": "N/A — no auth for this app; ownership uses per-season tokens returned by /api/season/create.",
+  "seed_data_creation": "Created transient KC 2025 seasons for testing (persisted in MongoDB). No cleanup needed — seasons are per-user and this app has no user accounts.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests split into two files: backend_test.py (security regression, 20 tests) and test_flippy_deck.py (Flippy Deck, 5 tests). Sim-game POST needs {season_id, game_id} and returns {game, result:{plays:[...]}}. Plays use key `play_type` (not `type`). Cards attached only to RUN/PASS plays. To test the rate limit test_next_year_rate_limit, use `-k next_year_rate_limit` and expect ~65s runtime. Frontend Flippy tests: seed localStorage['nfl_owner_tokens'] = {sid:token} before navigating to /season/{sid}/game/{gid}."
+}

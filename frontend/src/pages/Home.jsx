@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listTeams, createSeason, api } from "@/lib/api";
+import { listTeams, createSeason, saveOwnerToken, api } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function Home() {
@@ -29,6 +29,9 @@ export default function Home() {
     setCreating(true);
     try {
       const s = await api.post("/season/create", { user_team: selected, year: 2025, difficulty }).then((r) => r.data);
+      if (s?.id && s?.owner_token) {
+        saveOwnerToken(s.id, s.owner_token);
+      }
       localStorage.setItem("gr_last_season", JSON.stringify({ id: s.id, team: selected }));
       toast.success(`Season started as ${selected} (${difficulty})`);
       nav(`/season/${s.id}`);
