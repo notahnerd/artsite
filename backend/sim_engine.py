@@ -4,6 +4,8 @@ Each play resolves through PLAYER CARDS (see player_cards.py):
 - Run: RB card; team DEF adjusts
 - Weather modifies pass yardage, INT/big-play chance and kicking
 - Depth chart overrides QB/RB/K if provided
+- Injuries: names in `injured` set are removed from consideration
+- Difficulty: yardage multiplier (arcade=1.0, balanced=0.75, realistic=0.55)
 """
 import random
 from typing import Dict, List, Tuple, Optional
@@ -11,6 +13,10 @@ from typing import Dict, List, Tuple, Optional
 from nfl_data import get_team, get_players
 from player_cards import resolve_pass, resolve_run
 from weather import WEATHER_TYPES
+from injuries import roll_injuries_for_game
+
+
+DIFFICULTY_MULT = {"arcade": 1.0, "balanced": 0.7, "realistic": 0.5}
 
 
 RUN_CHART = {
@@ -112,7 +118,7 @@ def _add_player_stat(pstats, player, key, val):
     entry[key] = entry.get(key, 0) + val
 
 
-def simulate_play(state, teams, players, weather_code, pstats):
+def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1.0):
     off_id = state["possession"]
     def_id = state["home"] if off_id == state["away"] else state["away"]
     off_team = teams[off_id]
@@ -188,11 +194,15 @@ def simulate_play(state, teams, players, weather_code, pstats):
 
     if play_type == "RUN":
         yards, result = resolve_run(rb, def_team, roll)
+        if yards > 0:
+            yards = int(round(yards * difficulty_mult))
         _add_player_stat(pstats, rb, "carries", 1)
     else:
         receiver = _pick_receiver(off_players)
         yards, result = resolve_pass(qb, receiver, def_team, roll)
         yards, result = _apply_weather_pass(yards, result, weather_code)
+        if yards > 0:
+            yards = int(round(yards * difficulty_mult))
         event["target"] = receiver.get("name")
         _add_player_stat(pstats, receiver, "targets", 1)
 
@@ -337,32 +347,56 @@ def new_game_state(home_id, away_id):
     }
 
 
-def _apply_starters_override(all_players: List[Dict], depth_chart: Optional[Dict]) -> List[Dict]:
-    """Depth chart is {pos: player_name}. Set starter flag accordingly."""
-    if not depth_chart:
-        return all_players
+def _apply_starters_override(all_players: List[Dict], depth_chart: Optional[Dict], injured_names: Optional[set] = None) -> List[Dict]:
+    """Depth chart is {pos: player_name}. Injuries force fallback to backup at that pos."""
+    injured_names = injured_names or set()
     result = [dict(p) for p in all_players]
-    for pos, name in depth_chart.items():
-        # Reset all at that pos to non-starter
-        for p in result:
-            if p["pos"] == pos:
-                p["starter"] = False
-        # Mark selected
-        for p in result:
-            if p["name"] == name:
-                p["starter"] = True
+
+    # Apply user depth chart first
+    if depth_chart:
+        for pos, name in depth_chart.items():
+            for p in result:
+                if p["pos"] == pos:
+                    p["starter"] = False
+            for p in result:
+                if p["name"] == name:
+                    p["starter"] = True
+
+    # Enforce injuries: if any starter is injured, promote first healthy backup at that pos
+    positions_needing = set()
+    for p in result:
+        if p["name"] in injured_names:
+            p["starter"] = False
+            p["injured"] = True
+            positions_needing.add(p["pos"])
+    for pos in positions_needing:
+        healthy = [p for p in result if p["pos"] == pos and p["name"] not in injured_names]
+        if not healthy:
+            continue
+        if any(p.get("starter") for p in healthy):
+            continue
+        healthy.sort(key=lambda x: -x["ovr"])
+        healthy[0]["starter"] = True
     return result
 
 
-def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None, allow_ot=True) -> Dict:
+def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None,
+                       injuries=None, difficulty="arcade", allow_ot=True,
+                       roll_new_injuries=True, custom_rosters=None) -> Dict:
     from nfl_data import TEAMS
     teams = {t["id"]: t for t in TEAMS}
     depth_charts = depth_charts or {}
+    injuries = injuries or {}
+    custom_rosters = custom_rosters or {}
+    mult = DIFFICULTY_MULT.get(difficulty, 1.0)
+
+    def _roster(tid):
+        return custom_rosters.get(tid) or get_players(tid)
+
     players = {
-        home_id: _apply_starters_override(get_players(home_id), depth_charts.get(home_id)),
-        away_id: _apply_starters_override(get_players(away_id), depth_charts.get(away_id)),
+        home_id: _apply_starters_override(_roster(home_id), depth_charts.get(home_id), injuries.get(home_id)),
+        away_id: _apply_starters_override(_roster(away_id), depth_charts.get(away_id), injuries.get(away_id)),
     }
-    # Tag team on players for stat attribution
     for tid, plist in players.items():
         for p in plist:
             p["team"] = tid
@@ -374,34 +408,34 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
     max_plays = 220
 
     while state["quarter"] <= 4 and len(plays) < max_plays:
-        ev = simulate_play(state, teams, players, weather_code, pstats)
+        ev = simulate_play(state, teams, players, weather_code, pstats, mult)
         plays.append(ev)
         _accumulate_stats(stats, ev)
 
-    # Overtime for playoffs if tied
     hs = state[f"{home_id}_score"]
     as_ = state[f"{away_id}_score"]
     if allow_ot and hs == as_:
-        # sudden score up to 40 more plays
         state["clock"] = 600
         state["quarter"] = 5
         ot_plays = 0
-        start_scores = (hs, as_)
         while ot_plays < 40:
-            ev = simulate_play(state, teams, players, weather_code, pstats)
+            ev = simulate_play(state, teams, players, weather_code, pstats, mult)
             plays.append(ev)
             _accumulate_stats(stats, ev)
             ot_plays += 1
-            hs2 = state[f"{home_id}_score"]
-            as2 = state[f"{away_id}_score"]
-            if hs2 != as2:
+            if state[f"{home_id}_score"] != state[f"{away_id}_score"]:
                 break
-        # if still tied, add +1 to the team with more yards (rare fallback for playoffs)
         if state[f"{home_id}_score"] == state[f"{away_id}_score"]:
             if stats[home_id]["total_yards"] >= stats[away_id]["total_yards"]:
                 state[f"{home_id}_score"] += 3
             else:
                 state[f"{away_id}_score"] += 3
+
+    # Roll new injuries after the game for starters who actually played
+    new_injuries = {}
+    if roll_new_injuries:
+        new_injuries[home_id] = roll_injuries_for_game(players[home_id])
+        new_injuries[away_id] = roll_injuries_for_game(players[away_id])
 
     return {
         "home": home_id, "away": away_id,
@@ -410,6 +444,8 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
         "plays": plays, "stats": stats,
         "player_stats": pstats,
         "weather": weather_code,
+        "difficulty": difficulty,
+        "new_injuries": new_injuries,
     }
 
 

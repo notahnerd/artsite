@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getSeason, getTeam, simGame, simWeek } from "@/lib/api";
+import { getSeason, getTeam, simGame, simWeek, api } from "@/lib/api";
 import { toast } from "sonner";
 import Nav from "@/components/Nav";
 import PlayerCard from "@/components/PlayerCard";
 import WeatherBadge from "@/components/WeatherBadge";
 import DepthChartDialog from "@/components/DepthChartDialog";
-import { Settings } from "lucide-react";
+import PlayoffRace from "@/components/PlayoffRace";
+import InjuryReport from "@/components/InjuryReport";
+import TradeDialog from "@/components/TradeDialog";
+import DifficultyPicker from "@/components/DifficultyPicker";
+import { Settings, RefreshCw, Bandage } from "lucide-react";
 
 export default function Season() {
   const { id } = useParams();
@@ -16,6 +20,7 @@ export default function Season() {
   const [roster, setRoster] = useState(null);
   const [simmingWeek, setSimmingWeek] = useState(false);
   const [depthOpen, setDepthOpen] = useState(false);
+  const [tradeOpen, setTradeOpen] = useState(false);
 
   const load = async () => {
     const s = await getSeason(id);
@@ -25,9 +30,11 @@ export default function Season() {
       const details = await Promise.all(s.standings.map((st) => getTeam(st.team)));
       details.forEach((d) => { map[d.team.id] = d.team; });
       setTeamsById(map);
-      const my = details.find((d) => d.team.id === s.user_team);
-      setRoster(my);
     }
+    // Always refresh roster (reflects trades / injuries)
+    const my = teamsById[s.user_team] || (await getTeam(s.user_team)).team;
+    const dc = await import("@/lib/api").then((m) => m.api.get(`/season/${id}/depth-chart/${s.user_team}`));
+    setRoster({ team: my, players: dc.data.roster });
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
@@ -67,7 +74,21 @@ export default function Season() {
             <div className="text-xs font-mono uppercase tracking-[0.3em] text-amber-400">Season 2025 • Week {currentWeek}</div>
             <h1 className="font-display font-black uppercase text-3xl md:text-4xl">Season Command</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <DifficultyPicker
+              seasonId={id}
+              current={season.difficulty || "balanced"}
+              onChange={(d) => setSeason((s) => ({ ...s, difficulty: d }))}
+            />
+            {currentWeek === 8 && !isPlayoffsReady && (
+              <button
+                onClick={() => setTradeOpen(true)}
+                data-testid="open-trade-btn"
+                className="px-3 py-2 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 font-display font-bold uppercase tracking-wider text-xs flex items-center gap-1.5"
+              >
+                <RefreshCw size={12} /> Trade Deadline
+              </button>
+            )}
             {isPlayoffsReady && (
               <button
                 onClick={() => nav(`/season/${id}/playoffs`)}
@@ -98,6 +119,12 @@ export default function Season() {
             )}
           </div>
         </div>
+
+        {currentWeek >= 6 && !isPlayoffsReady && (
+          <PlayoffRace seasonId={id} teamsById={teamsById} />
+        )}
+
+        {currentWeek >= 2 && <InjuryReport seasonId={id} teamsById={teamsById} />}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* Week Schedule */}
@@ -176,6 +203,11 @@ export default function Season() {
                       <td className="py-2 font-mono text-slate-400">{p.num}</td>
                       <td className="font-semibold group">
                         <span className="group-hover:text-amber-300">{p.name}</span>
+                        {p.injured && (
+                          <span className="ml-2 text-[9px] font-mono uppercase tracking-widest text-rose-400 border border-rose-400/40 rounded px-1">
+                            OUT
+                          </span>
+                        )}
                         <span className="ml-2 text-[9px] font-mono uppercase tracking-widest text-slate-500 group-hover:text-amber-400">card →</span>
                       </td>
                       <td className="text-slate-300 font-mono text-xs">{p.pos}</td>
@@ -189,13 +221,22 @@ export default function Season() {
         )}
 
         {roster?.team && (
-          <DepthChartDialog
-            seasonId={id}
-            team={roster.team}
-            open={depthOpen}
-            onOpenChange={setDepthOpen}
-            onSaved={load}
-          />
+          <>
+            <DepthChartDialog
+              seasonId={id}
+              team={roster.team}
+              open={depthOpen}
+              onOpenChange={setDepthOpen}
+              onSaved={load}
+            />
+            <TradeDialog
+              seasonId={id}
+              myTeam={roster.team}
+              open={tradeOpen}
+              onOpenChange={setTradeOpen}
+              onDone={load}
+            />
+          </>
         )}
       </div>
     </div>

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listTeams, createSeason } from "@/lib/api";
+import { listTeams, createSeason, api } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function Home() {
   const [teams, setTeams] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [difficulty, setDifficulty] = useState("balanced");
   const [creating, setCreating] = useState(false);
   const nav = useNavigate();
 
@@ -27,9 +28,9 @@ export default function Home() {
     if (!selected) return;
     setCreating(true);
     try {
-      const s = await createSeason(selected);
+      const s = await api.post("/season/create", { user_team: selected, year: 2025, difficulty }).then((r) => r.data);
       localStorage.setItem("gr_last_season", JSON.stringify({ id: s.id, team: selected }));
-      toast.success(`Season started as ${selected}`);
+      toast.success(`Season started as ${selected} (${difficulty})`);
       nav(`/season/${s.id}`);
     } catch (e) {
       toast.error("Could not start season");
@@ -84,7 +85,22 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="mt-10 sticky bottom-4 flex justify-end">
+        <div className="mt-10 sticky bottom-4 flex justify-end items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900/80 border border-white/10 backdrop-blur">
+            <span className="px-2 text-[10px] font-mono uppercase tracking-widest text-slate-400">Difficulty</span>
+            {["arcade", "balanced", "realistic"].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDifficulty(d)}
+                data-testid={`home-difficulty-${d}`}
+                className={`px-3 py-1.5 rounded text-[10px] font-mono uppercase tracking-widest font-bold transition-colors ${
+                  difficulty === d ? "bg-amber-500 text-slate-900" : "text-slate-300 hover:bg-white/5"
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
           <button
             data-testid="start-season-btn"
             disabled={!selected || creating}

@@ -11,11 +11,12 @@ from typing import Optional, Dict, List
 from datetime import datetime, timezone
 
 from nfl_data import TEAMS, PLAYERS, get_team, get_players
-from sim_engine import simulate_full_game, RUN_CHART, PASS_CHART
+from sim_engine import simulate_full_game, RUN_CHART, PASS_CHART, DIFFICULTY_MULT
 from player_cards import full_card
 from season import generate_schedule, compute_standings
 from weather import WEATHER_TYPES, roll_weather
 from playoffs import seed_playoffs, build_bracket, advance_bracket, ROUND_LABELS
+from injuries import active_injuries, injured_names
 
 
 ROOT_DIR = Path(__file__).parent
@@ -33,6 +34,7 @@ api = APIRouter(prefix="/api")
 class CreateSeasonReq(BaseModel):
     user_team: str
     year: int = 2025
+    difficulty: str = "balanced"
 
 
 class SimGameReq(BaseModel):
@@ -53,7 +55,20 @@ class DepthChartUpdate(BaseModel):
 
 class PlayoffGameReq(BaseModel):
     season_id: str
-    game_id: str  # bracket game id
+    game_id: str
+
+
+class DifficultyReq(BaseModel):
+    season_id: str
+    difficulty: str
+
+
+class TradeReq(BaseModel):
+    season_id: str
+    my_team: str
+    my_player: str
+    other_team: str
+    other_player: str
 
 
 # ---------- Helpers ----------
@@ -66,6 +81,29 @@ async def _load_season(season_id):
 
 def _get_depth(season, team_id):
     return (season.get("depth_charts") or {}).get(team_id)
+
+
+def _get_injured(season, team_id, week):
+    injuries = (season.get("injuries") or {}).get(team_id, [])
+    return injured_names(injuries, week)
+
+
+def _apply_new_injuries(season, team_id, week, new_injuries: List[Dict]):
+    """Append new injuries with injured_week set."""
+    if not new_injuries:
+        return
+    ilist = season.setdefault("injuries", {}).setdefault(team_id, [])
+    for inj in new_injuries:
+        ilist.append({**inj, "injured_week": week})
+
+
+def _team_roster_with_trades(season, team_id):
+    """Return roster including trade-added players and excluding traded-away starters."""
+    base = get_players(team_id)
+    removed = set((season.get("trade_removed") or {}).get(team_id, []))
+    filtered = [p for p in base if p["name"] not in removed]
+    added = (season.get("trade_players") or {}).get(team_id, [])
+    return filtered + [dict(p, starter=True) for p in added]
 
 
 # ---------- Routes ----------
@@ -129,9 +167,14 @@ async def create_season(req: CreateSeasonReq):
         "id": season_id,
         "user_team": req.user_team,
         "year": req.year,
+        "difficulty": req.difficulty if req.difficulty in DIFFICULTY_MULT else "balanced",
         "schedule": schedule,
         "current_week": 1,
-        "depth_charts": {},  # team -> {pos: player_name}
+        "depth_charts": {},
+        "injuries": {},   # team_id -> [{player, pos, weeks_out, desc, injured_week}]
+        "trades": [],     # list of trade records
+        "trade_players": {},  # team_id -> list of added player dicts (from trades)
+        "trade_removed": {},  # team_id -> list of removed starter names
         "playoffs": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -159,25 +202,24 @@ async def sim_game(req: SimGameReq):
     game = next((g for g in s["schedule"] if g["game_id"] == req.game_id), None)
     if not game:
         raise HTTPException(404, "Game not found")
+    week = game["week"]
+    common_kwargs = dict(
+        weather_code=game.get("weather", "CLEAR"),
+        depth_charts={game["home"]: _get_depth(s, game["home"]), game["away"]: _get_depth(s, game["away"])},
+        injuries={game["home"]: _get_injured(s, game["home"], week), game["away"]: _get_injured(s, game["away"], week)},
+        difficulty=s.get("difficulty", "balanced"),
+        custom_rosters={game["home"]: _team_roster_with_trades(s, game["home"]),
+                        game["away"]: _team_roster_with_trades(s, game["away"])},
+    )
     if game["played"]:
         if game.get("log_id"):
             log = await db.game_logs.find_one({"id": game["log_id"]}, {"_id": 0})
             if log and log.get("result", {}).get("plays"):
                 return {"already_played": True, "game": game, "result": log["result"]}
-        result = simulate_full_game(
-            game["home"], game["away"],
-            weather_code=game.get("weather", "CLEAR"),
-            depth_charts={game["home"]: _get_depth(s, game["home"]), game["away"]: _get_depth(s, game["away"])},
-            allow_ot=False,
-        )
+        result = simulate_full_game(game["home"], game["away"], allow_ot=False, roll_new_injuries=False, **common_kwargs)
         return {"already_played": True, "game": game, "result": result}
 
-    result = simulate_full_game(
-        game["home"], game["away"],
-        weather_code=game.get("weather", "CLEAR"),
-        depth_charts={game["home"]: _get_depth(s, game["home"]), game["away"]: _get_depth(s, game["away"])},
-        allow_ot=False,
-    )
+    result = simulate_full_game(game["home"], game["away"], allow_ot=False, **common_kwargs)
     game["played"] = True
     game["home_score"] = result["home_score"]
     game["away_score"] = result["away_score"]
@@ -190,9 +232,12 @@ async def sim_game(req: SimGameReq):
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     game["log_id"] = game_log_id
+    # Apply injuries to season doc
+    _apply_new_injuries(s, game["home"], week, result.get("new_injuries", {}).get(game["home"], []))
+    _apply_new_injuries(s, game["away"], week, result.get("new_injuries", {}).get(game["away"], []))
     await db.seasons.update_one(
         {"id": req.season_id},
-        {"$set": {"schedule": s["schedule"]}},
+        {"$set": {"schedule": s["schedule"], "injuries": s.get("injuries", {})}},
     )
     return {"game": game, "result": result}
 
@@ -208,6 +253,10 @@ async def sim_week(req: SimWeekReq):
             g["home"], g["away"],
             weather_code=g.get("weather", "CLEAR"),
             depth_charts={g["home"]: _get_depth(s, g["home"]), g["away"]: _get_depth(s, g["away"])},
+            injuries={g["home"]: _get_injured(s, g["home"], g["week"]), g["away"]: _get_injured(s, g["away"], g["week"])},
+            difficulty=s.get("difficulty", "balanced"),
+            custom_rosters={g["home"]: _team_roster_with_trades(s, g["home"]),
+                            g["away"]: _team_roster_with_trades(s, g["away"])},
             allow_ot=False,
         )
         g["played"] = True
@@ -228,11 +277,13 @@ async def sim_week(req: SimWeekReq):
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
         g["log_id"] = log_id
+        _apply_new_injuries(s, g["home"], g["week"], result.get("new_injuries", {}).get(g["home"], []))
+        _apply_new_injuries(s, g["away"], g["week"], result.get("new_injuries", {}).get(g["away"], []))
         played_games.append(g)
     new_week = min(19, max(s.get("current_week", 1), req.week + 1))
     await db.seasons.update_one(
         {"id": req.season_id},
-        {"$set": {"schedule": s["schedule"], "current_week": new_week}},
+        {"$set": {"schedule": s["schedule"], "current_week": new_week, "injuries": s.get("injuries", {})}},
     )
     return {"played": played_games, "current_week": new_week}
 
@@ -259,7 +310,122 @@ async def update_depth_chart(req: DepthChartUpdate):
 async def get_depth_chart(season_id: str, team: str):
     s = await _load_season(season_id)
     depth = (s.get("depth_charts") or {}).get(team, {})
-    return {"team": team, "depth": depth, "roster": get_players(team)}
+    roster = _team_roster_with_trades(s, team)
+    week = s.get("current_week", 1)
+    inj = _get_injured(s, team, week)
+    for p in roster:
+        if p["name"] in inj:
+            p["injured"] = True
+    return {"team": team, "depth": depth, "roster": roster}
+
+
+# ---------- Injuries ----------
+@api.get("/season/{season_id}/injuries")
+async def list_injuries(season_id: str):
+    s = await _load_season(season_id)
+    week = s.get("current_week", 1)
+    out = {}
+    for tid, ilist in (s.get("injuries") or {}).items():
+        act = active_injuries(ilist, week)
+        if act:
+            out[tid] = [dict(i, weeks_remaining=(i["injured_week"] + i["weeks_out"] - week)) for i in act]
+    return {"week": week, "injuries": out}
+
+
+# ---------- Difficulty ----------
+@api.post("/season/difficulty")
+async def set_difficulty(req: DifficultyReq):
+    if req.difficulty not in DIFFICULTY_MULT:
+        raise HTTPException(400, "Invalid difficulty")
+    await db.seasons.update_one({"id": req.season_id}, {"$set": {"difficulty": req.difficulty}})
+    return {"difficulty": req.difficulty}
+
+
+@api.get("/difficulties")
+async def list_difficulties():
+    return {
+        "options": [
+            {"code": "arcade", "label": "Arcade", "desc": "High-scoring shootouts. Full card yardage."},
+            {"code": "balanced", "label": "Balanced", "desc": "Realistic-ish scoring, some big plays."},
+            {"code": "realistic", "label": "Realistic", "desc": "Grounded low-scoring games. Modest yardage."},
+        ],
+    }
+
+
+# ---------- Trades ----------
+@api.post("/season/trade")
+async def make_trade(req: TradeReq):
+    s = await _load_season(req.season_id)
+    if s.get("current_week", 1) != 8:
+        raise HTTPException(400, "Trades only allowed at Week 8")
+    my_roster = _team_roster_with_trades(s, req.my_team)
+    other_roster = _team_roster_with_trades(s, req.other_team)
+    my_player = next((p for p in my_roster if p["name"] == req.my_player), None)
+    other_player = next((p for p in other_roster if p["name"] == req.other_player), None)
+    if not my_player or not other_player:
+        raise HTTPException(400, "Player not found")
+    if my_player.get("pos") != other_player.get("pos"):
+        raise HTTPException(400, "Trades must be same position")
+    # Track: remove my_player from my_team; remove other_player from other_team;
+    # add my_player to other_team; add other_player to my_team.
+    removed = s.setdefault("trade_removed", {})
+    added = s.setdefault("trade_players", {})
+    removed.setdefault(req.my_team, []).append(my_player["name"])
+    removed.setdefault(req.other_team, []).append(other_player["name"])
+    added.setdefault(req.other_team, []).append({**my_player, "starter": True})
+    added.setdefault(req.my_team, []).append({**other_player, "starter": True})
+    trade_record = {
+        "week": s.get("current_week"),
+        "my_team": req.my_team, "my_player": my_player,
+        "other_team": req.other_team, "other_player": other_player,
+    }
+    s.setdefault("trades", []).append(trade_record)
+    await db.seasons.update_one(
+        {"id": req.season_id},
+        {"$set": {"trade_removed": removed, "trade_players": added, "trades": s["trades"]}},
+    )
+    return {"trade": trade_record, "trades": s["trades"]}
+
+
+@api.get("/season/{season_id}/tradeable-players")
+async def tradeable_players(season_id: str, exclude_team: str):
+    """List candidate targets from other teams (only starters)."""
+    s = await _load_season(season_id)
+    out = []
+    for t in TEAMS:
+        if t["id"] == exclude_team:
+            continue
+        roster = _team_roster_with_trades(s, t["id"])
+        starters = [p for p in roster if p.get("starter") and p["pos"] in ("QB", "RB", "WR", "TE", "K")]
+        out.append({"team": t, "players": starters})
+    return {"teams": out, "current_week": s.get("current_week", 1)}
+
+
+# ---------- Playoff Race ----------
+@api.get("/season/{season_id}/playoff-race")
+async def playoff_race(season_id: str):
+    s = await _load_season(season_id)
+    standings = compute_standings(s["schedule"])
+    afc = [x for x in standings if x["conf"] == "AFC"]
+    nfc = [x for x in standings if x["conf"] == "NFC"]
+
+    def _classify(conf_list):
+        result = []
+        for i, t in enumerate(conf_list):
+            if i < 7:
+                status = "IN"
+            elif i < 10:
+                status = "BUBBLE"
+            else:
+                status = "OUT"
+            result.append({**t, "seed": i + 1, "status": status})
+        return result
+
+    return {
+        "AFC": _classify(afc),
+        "NFC": _classify(nfc),
+        "current_week": s.get("current_week", 1),
+    }
 
 
 # ---------- Stat Leaders ----------
@@ -330,10 +496,16 @@ async def sim_playoff_game(req: PlayoffGameReq):
             return {"already_played": True, "game": game, "result": log["result"]}
     weather = game.get("weather") or roll_weather(game["home"])
     game["weather"] = weather
+    week = 19  # playoffs = post-regular season
     result = simulate_full_game(
         game["home"], game["away"], weather_code=weather,
         depth_charts={game["home"]: _get_depth(s, game["home"]), game["away"]: _get_depth(s, game["away"])},
+        injuries={game["home"]: _get_injured(s, game["home"], week), game["away"]: _get_injured(s, game["away"], week)},
+        difficulty=s.get("difficulty", "balanced"),
+        custom_rosters={game["home"]: _team_roster_with_trades(s, game["home"]),
+                        game["away"]: _team_roster_with_trades(s, game["away"])},
         allow_ot=True,
+        roll_new_injuries=False,
     )
     game["played"] = True
     game["home_score"] = result["home_score"]
