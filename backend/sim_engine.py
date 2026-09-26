@@ -14,6 +14,7 @@ from nfl_data import get_team, get_players
 from player_cards import resolve_pass, resolve_run, team_pass_defense_card, team_run_defense_card, k_card
 from weather import WEATHER_TYPES
 from injuries import roll_injuries_for_game
+from flippy_deck import new_deck, draw as draw_card, remaining as deck_remaining, pick_injury_target, apply_concussion
 
 
 DIFFICULTY_MULT = {"arcade": 1.0, "balanced": 0.7, "realistic": 0.5}
@@ -62,7 +63,7 @@ def roll_2d6() -> Tuple[int, int]:
     return random.randint(1, 6), random.randint(1, 6)
 
 
-def choose_play_type(down, distance, ball_on, score_diff, quarter, clock, philosophy="balanced"):
+def choose_play_type(down, distance, ball_on, score_diff, quarter, clock, philosophy="balanced", pass_bias=0.0):
     yards_to_goal = 100 - ball_on
     aggro = {"aggressive": 0.15, "balanced": 0.0, "conservative": -0.10}.get(philosophy, 0.0)
     if down == 4:
@@ -75,13 +76,13 @@ def choose_play_type(down, distance, ball_on, score_diff, quarter, clock, philos
         if distance <= threshold_dist and ball_on > threshold_ball:
             return "RUN" if random.random() < 0.5 else "PASS"
         return "PUNT"
-    pass_prob = 0.55 + aggro
+    pass_prob = 0.55 + aggro + pass_bias
     if score_diff < -7 and quarter >= 3:
-        pass_prob = 0.82 + aggro / 2
+        pass_prob = 0.82 + aggro / 2 + pass_bias
     if distance >= 8:
         pass_prob = min(0.90, pass_prob + 0.15)
     if distance <= 2:
-        pass_prob = 0.35 + aggro
+        pass_prob = 0.35 + aggro + pass_bias
     return "PASS" if random.random() < max(0.15, min(0.9, pass_prob)) else "RUN"
 
 
@@ -170,6 +171,27 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
         "score_change": None, "turnover": False,
     }
 
+    # ---------- FLIPPY DECK PRE-SNAP FLIP ----------
+    # Draw a card for RUN/PASS plays only. PUNT/FG bail out below so the card
+    # is only recorded when it actually influences a scrimmage play.
+    flippy_card = None
+    if play_type in ("RUN", "PASS"):
+        deck = state.get("deck")
+        if deck is not None:
+            flippy_card = draw_card(deck)
+            flippy_card["remaining"] = deck_remaining(deck)
+            event["card"] = flippy_card
+            if flippy_card["type"] == "INJURY":
+                victim = pick_injury_target(off_players)
+                if victim:
+                    inj = apply_concussion(off_players, victim)
+                    flippy_card["injury"] = inj
+                    # Re-pick starters used later this play
+                    qb = next((p for p in off_players if p.get("starter") and p["pos"] == "QB"), qb)
+                    rb = next((p for p in off_players if p.get("starter") and p["pos"] == "RB"), rb)
+                    kicker = next((p for p in off_players if p.get("starter") and p["pos"] == "K"), kicker)
+    # ---------- END FLIPPY DECK PRE-SNAP FLIP ----------
+
     if play_type == "PUNT":
         punt_dist = random.randint(38, 55)
         new_ball = max(20, min(95, ball_on + punt_dist))
@@ -235,6 +257,15 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
         event["target"] = receiver.get("name")
         _add_player_stat(pstats, receiver, "targets", 1)
 
+    # ---------- YARDS CARD OVERRIDE ----------
+    # If the pre-snap flip was a yardage card, it replaces the dice-chart yards.
+    # Turnovers/TDs are computed from ball position; no fake sacks/INTs from cards.
+    if flippy_card and flippy_card.get("type") == "YARDS":
+        yards = flippy_card["yards"]
+        result = "NORMAL" if play_type == "RUN" else ("INCOMPLETE" if yards == 0 else "NORMAL")
+        event["card_override"] = True
+    # ---------- END YARDS CARD OVERRIDE ----------
+
     if result == "INT":
         event["turnover"] = True
         event["yards"] = 0
@@ -299,8 +330,8 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
         event["description"] = f"DROP! {event.get('target','Receiver')} can't hang on to {qb['name']}'s pass."
         yards = 0
 
-    # Fumble chance
-    if result == "NORMAL" and yards > 0 and random.random() < 0.03:
+    # Fumble chance (skip on card override — card yards are authoritative)
+    if result == "NORMAL" and yards > 0 and not event.get("card_override") and random.random() < 0.03:
         event["turnover"] = True
         event["result"] = "FUMBLE"
         event["yards"] = yards
@@ -494,6 +525,7 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
             p["team"] = tid
 
     state = new_game_state(home_id, away_id)
+    state["deck"] = new_deck()
     plays = []
     stats = {home_id: _empty_stats(), away_id: _empty_stats()}
     pstats: Dict[str, Dict] = {}

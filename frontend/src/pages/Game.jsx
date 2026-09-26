@@ -8,6 +8,7 @@ import Field from "@/components/Field";
 import PlayByPlay from "@/components/PlayByPlay";
 import BoxScore from "@/components/BoxScore";
 import Dice from "@/components/Dice";
+import FlippyDeck from "@/components/FlippyDeck";
 import WeatherBadge from "@/components/WeatherBadge";
 import RivalryBadge from "@/components/RivalryBadge";
 import InjuryTicker from "@/components/InjuryTicker";
@@ -88,6 +89,13 @@ export default function Game({ playoff = false }) {
     if (play.result === "INT") toast.error("INTERCEPTION!");
     if (play.result === "FUMBLE") toast.error("FUMBLE!");
     if (play.result === "FG_GOOD") toast.success("Field Goal is GOOD!");
+    if (play.card?.type === "INJURY" && play.card?.injury) {
+      const inj = play.card.injury;
+      toast.error(`🚑 CONCUSSION! ${inj.player} (${inj.pos}) — OUT for the game`);
+    }
+    if (play.card_override && play.card?.type === "YARDS" && Math.abs(play.card.yards) >= 30) {
+      toast.success(`🎴 Flippy Deck BREAKAWAY! +${play.card.yards}`);
+    }
 
     rollTimerRef.current = setTimeout(() => {
       setRolling(false);
@@ -110,6 +118,7 @@ export default function Game({ playoff = false }) {
   const displayWhite = last ? last.dice : [1, 1, 1];
   const displayRed = last ? last.red : 1;
   const displayRead = last ? last.read : null;
+  const displayCard = last ? last.card : null;
 
   if (initialLoading || !state || !game) {
     return (
@@ -147,11 +156,16 @@ export default function Game({ playoff = false }) {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* Dice + Controls */}
           <div className="lg:col-span-4 space-y-4">
-            <div className="card-broadcast p-5">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-3">
-                3D6 + RED DIE ROLL
+            <div className="grid grid-cols-3 gap-3">
+              <div className="card-broadcast p-4 col-span-2">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-3">
+                  3D6 + RED DIE ROLL
+                </div>
+                <Dice white={displayWhite} red={displayRed} read={displayRead} rolling={rolling} />
               </div>
-              <Dice white={displayWhite} red={displayRed} read={displayRead} rolling={rolling} />
+              <FlippyDeck card={displayCard} flipping={rolling} />
+            </div>
+            <div className="card-broadcast p-5">
               {last && (
                 <div className="mt-4 pt-4 border-t border-white/5">
                   <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">

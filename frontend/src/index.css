@@ -95,6 +95,84 @@ body {
 .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.4); border-radius: 3px; }
 
+/* ---------- Flippy Deck ---------- */
+.flippy-stage {
+    perspective: 900px;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    max-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.flippy-card {
+    position: relative;
+    width: 130px;
+    height: 180px;
+    transform-style: preserve-3d;
+    transition: transform 0.62s cubic-bezier(0.34, 1.2, 0.6, 1);
+    will-change: transform;
+}
+.flippy-card.is-back { transform: rotateY(180deg); }
+.flippy-card.is-face { transform: rotateY(0deg); }
+.flippy-face {
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.03);
+}
+.flippy-front {
+    background: linear-gradient(160deg, #0f172a 0%, #111827 60%, #0b1220 100%);
+}
+.flippy-back {
+    transform: rotateY(180deg);
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(192, 38, 211, 0.30) 0px, rgba(192, 38, 211, 0.30) 8px,
+        rgba(30, 27, 75, 0.85) 8px, rgba(30, 27, 75, 0.85) 16px
+    ), #1e1b4b;
+    border-color: rgba(232, 121, 249, 0.35);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.55), 0 0 0 2px rgba(232, 121, 249, 0.20) inset;
+}
+.flippy-back-inner {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 6px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(232, 121, 249, 0.40);
+    border-radius: 8px;
+    width: 78%;
+    height: 78%;
+}
+.flippy-diamond {
+    width: 30px; height: 30px;
+    transform: rotate(45deg);
+    background: linear-gradient(135deg, #f0abfc, #a855f7);
+    box-shadow: 0 0 24px rgba(232, 121, 249, 0.55);
+    border-radius: 4px;
+}
+.flippy-front-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px;
+    width: 100%;
+}
+
+
 @layer base {
     :root {
         --background: 220 38% 5%;
