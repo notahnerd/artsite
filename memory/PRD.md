@@ -45,3 +45,27 @@ NFL football simulation game with dice rolls and chart-based outcomes using real
 
 ## New Components
 - PlaybookPicker, RivalPickerDialog, RivalryBadge
+
+
+### Security Hardening (v6 - 2026-02-26)
+- **Per-season ownership token**: create_season now returns an `owner_token` (32-byte urlsafe). All mutating endpoints require the token via `X-Owner-Token` header. Reads are public; token is stripped from GET /season/{id} responses. Legacy seasons without a token are grandfathered open.
+- **Rate limits (slowapi)**: create=10/min, sim-game=60/min, sim-week=30/min, playoff-game=60/min, next-year=5/min, default 120/min per-IP.
+- **Security headers**: X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Referrer-Policy: strict-origin-when-cross-origin, Strict-Transport-Security (1yr), Permissions-Policy; 1 MB request body cap.
+- **CORS hardening**: allow_credentials auto-disabled when origins is wildcard; scoped methods/headers.
+- **Team-id validation**: coaching, playbook, rival, depth-chart, trade endpoints reject unknown team IDs (400).
+- **Dependency trim**: removed unused sensitive deps (python-jose, pyjwt, passlib, bcrypt, boto3, emergentintegrations); added slowapi.
+
+### Flippy Deck (v6 - 2026-02-26)
+- **250-card pre-play deck per game**: 150 "ROLL DICE" cards + 98 yardage cards (-6 .. +45, realistic right-skewed curve, 2× 45-yd breakaways) + 2 concussion injury cards. Auto-reshuffles when empty.
+- **Draw trigger**: RUN/PASS scrimmage plays only. PUNT/FG/XP/Kickoff never draw a card.
+- **YARDS card override**: card.yards replaces dice-chart yards; TDs, first downs and turnover-on-downs still computed from ball position. Random fumble roll suppressed on card overrides.
+- **INJURY card**: 40% QB / 60% RB/WR/TE/K; victim marked injured & out for game, first healthy backup auto-promoted.
+- **Frontend**: `FlippyDeck.jsx` — 3D CSS flip animation, purple-stripe back with "FLIPPY DECK" branding, remaining pill (X/250), color-coded faces (breakaway green, chunk emerald, loss rose, injury rose). Toast on breakaway and concussion.
+
+## Files Added
+- /app/backend/flippy_deck.py
+- /app/frontend/src/components/FlippyDeck.jsx
+- /app/backend/tests/backend_test.py, /app/backend/tests/test_flippy_deck.py (regression)
+
+## Bug Fixes
+- 2026-02-26 — Home.jsx create-season flow bypassed the createSeason() wrapper, so the returned owner_token was never persisted; every new UI-created season failed sim-game with 403 ("loading error"). Fixed by importing saveOwnerToken and calling it after api.post('/season/create').
