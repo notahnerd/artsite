@@ -78,6 +78,7 @@ function CardTable({ chart, type }) {
   const rolls = Array.from({ length: 16 }, (_, i) => i + 3);
   const isYacCard = type === "WR" || type === "TE";
   const isDef = type === "DEF";
+  const isKicker = type === "K";
   return (
     <table className="w-full text-sm" data-testid="player-card-table">
       <thead>
@@ -90,6 +91,11 @@ function CardTable({ chart, type }) {
             </>
           ) : isDef ? (
             <th>Impact</th>
+          ) : isKicker ? (
+            <>
+              <th>Kick</th>
+              <th>Range +/−</th>
+            </>
           ) : (
             <>
               <th>Yards</th>
@@ -113,6 +119,15 @@ function CardTable({ chart, type }) {
                 </>
               ) : isDef ? (
                 <td className="font-mono tabular-nums text-amber-300">+{cell.impact}</td>
+              ) : isKicker ? (
+                <>
+                  <td className={`text-[10px] font-mono uppercase tracking-widest ${cell.make === false ? "text-rose-300" : cell.result === "BOOMSTICK" || cell.result === "BOMB" ? "text-emerald-300" : "text-slate-200"}`}>
+                    {cell.result.replace(/_/g, " ")}
+                  </td>
+                  <td className="font-mono tabular-nums text-slate-300">
+                    {cell.make === false ? "AUTO MISS" : cell.make === true ? "AUTO GOOD" : (cell.range_bonus >= 0 ? "+" : "") + cell.range_bonus + " yd"}
+                  </td>
+                </>
               ) : (
                 <>
                   <td className="font-mono tabular-nums">

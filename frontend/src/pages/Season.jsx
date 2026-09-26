@@ -11,7 +11,10 @@ import InjuryReport from "@/components/InjuryReport";
 import TradeDialog from "@/components/TradeDialog";
 import DifficultyPicker from "@/components/DifficultyPicker";
 import CoachingPicker from "@/components/CoachingPicker";
-import { Settings, RefreshCw, Bandage } from "lucide-react";
+import PlaybookPicker from "@/components/PlaybookPicker";
+import RivalPickerDialog from "@/components/RivalPickerDialog";
+import RivalryBadge from "@/components/RivalryBadge";
+import { Settings, RefreshCw, Bandage, Swords } from "lucide-react";
 
 export default function Season() {
   const { id } = useParams();
@@ -22,6 +25,7 @@ export default function Season() {
   const [simmingWeek, setSimmingWeek] = useState(false);
   const [depthOpen, setDepthOpen] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(false);
+  const [rivalOpen, setRivalOpen] = useState(false);
 
   const load = async () => {
     const s = await getSeason(id);
@@ -87,6 +91,19 @@ export default function Season() {
               current={(season.coaching || {})[season.user_team] || "balanced"}
               onChange={(c) => setSeason((s) => ({ ...s, coaching: { ...(s.coaching || {}), [s.user_team]: c } }))}
             />
+            <PlaybookPicker
+              seasonId={id}
+              team={season.user_team}
+              current={(season.playbook || {})[season.user_team] ?? 0}
+              onChange={(b) => setSeason((s) => ({ ...s, playbook: { ...(s.playbook || {}), [s.user_team]: b } }))}
+            />
+            <button
+              onClick={() => setRivalOpen(true)}
+              data-testid="open-rival-btn"
+              className="px-3 py-2 rounded-md bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-display font-bold uppercase tracking-wider text-xs flex items-center gap-1.5"
+            >
+              <Swords size={12} /> Rivals
+            </button>
             {currentWeek === 8 && !isPlayoffsReady && (
               <button
                 onClick={() => setTradeOpen(true)}
@@ -243,6 +260,13 @@ export default function Season() {
               onOpenChange={setTradeOpen}
               onDone={load}
             />
+            <RivalPickerDialog
+              seasonId={id}
+              team={roster.team}
+              open={rivalOpen}
+              onOpenChange={setRivalOpen}
+              onSaved={load}
+            />
           </>
         )}
       </div>
@@ -278,8 +302,9 @@ function GameRow({ game, teamsById, userTeam, onPlay }) {
           </span>
         </div>
         {game.weather && (
-          <div className="mt-1.5">
+          <div className="mt-1.5 flex items-center gap-1.5">
             <WeatherBadge code={game.weather} />
+            {game.rivalry && <RivalryBadge compact />}
           </div>
         )}
       </div>

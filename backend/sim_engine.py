@@ -11,7 +11,7 @@ import random
 from typing import Dict, List, Tuple, Optional
 
 from nfl_data import get_team, get_players
-from player_cards import resolve_pass, resolve_run, team_pass_defense_card, team_run_defense_card
+from player_cards import resolve_pass, resolve_run, team_pass_defense_card, team_run_defense_card, k_card
 from weather import WEATHER_TYPES
 from injuries import roll_injuries_for_game
 
@@ -134,7 +134,7 @@ def _add_player_stat(pstats, player, key, val):
     entry[key] = entry.get(key, 0) + val
 
 
-def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1.0, coaching=None):
+def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1.0, coaching=None, playbook=None, rivalry_bump=0):
     off_id = state["possession"]
     def_id = state["home"] if off_id == state["away"] else state["away"]
     off_team = teams[off_id]
@@ -145,10 +145,14 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
     down, distance, ball_on = state["down"], state["distance"], state["ball_on"]
     score_diff = state[f"{off_id}_score"] - state[f"{def_id}_score"]
     phil = (coaching or {}).get(off_id, "balanced")
-    play_type = choose_play_type(down, distance, ball_on, score_diff, state["quarter"], state["clock"], phil)
+    pass_bias = (playbook or {}).get(off_id, 0.0)
+    play_type = choose_play_type(down, distance, ball_on, score_diff, state["quarter"], state["clock"], phil, pass_bias)
 
     dice = roll_3d6_1red()
     roll = dice["total"]
+    # Rivalry bump nudges the sum toward big plays (bounded 3-18)
+    if rivalry_bump:
+        roll = max(3, min(18, roll + rivalry_bump))
     read = dice["read"]
 
     # Pick starters
@@ -183,27 +187,33 @@ def simulate_play(state, teams, players, weather_code, pstats, difficulty_mult=1
     if play_type == "FG":
         yards_to_goal = 100 - ball_on
         fg_distance = yards_to_goal + 17
-        base = max(0.35, (kicker.get("ovr", 80) - 60) / 40)
-        if fg_distance <= 35: chance = base + 0.35
-        elif fg_distance <= 45: chance = base + 0.15
-        elif fg_distance <= 55: chance = base - 0.05
-        else: chance = base - 0.25
-        # weather kicking penalty (penalty in %)
-        chance -= WEATHER_TYPES.get(weather_code, WEATHER_TYPES["CLEAR"])["fg_penalty"] / 100.0
-        chance = max(0.12, min(0.98, chance))
-        success = random.random() < chance
+        # Read the kicker's own 3-18 card using the same white-dice roll
+        kchart, k_range = k_card(kicker)
+        kcell = kchart[roll]
+        weather_penalty = WEATHER_TYPES.get(weather_code, WEATHER_TYPES["CLEAR"])["fg_penalty"]
+        effective_range = k_range + kcell["range_bonus"] - weather_penalty // 2
+        if kcell["make"] is True:
+            success = True
+        elif kcell["make"] is False:
+            success = False
+        else:
+            success = fg_distance <= effective_range
         event["yards"] = fg_distance
+        event["kick_result"] = kcell["result"]
         _add_player_stat(pstats, kicker, "fga", 1)
         if success:
             event["result"] = "FG_GOOD"
             event["score_change"] = {"team": off_id, "points": 3}
-            event["description"] = f"{kicker['name']} nails a {fg_distance}-yard field goal! GOOD."
+            bomb_note = " — BOMB!" if kcell["result"] in ("BOMB", "BOOMSTICK") else ""
+            event["description"] = f"{kicker['name']} kicks it {kcell['result'].replace('_',' ').title()} from {fg_distance}. GOOD{bomb_note}"
             state[f"{off_id}_score"] += 3
             _add_player_stat(pstats, kicker, "fgm", 1)
             _score_flip(state, def_id)
         else:
             event["result"] = "FG_MISS"
-            event["description"] = f"{kicker['name']}'s {fg_distance}-yard FG attempt is NO GOOD."
+            miss_reason = {"WIDE_LEFT": "wide left", "WIDE_RIGHT": "wide right",
+                           "HOOK": "hooked", "SLICE": "sliced"}.get(kcell["result"], "short")
+            event["description"] = f"{kicker['name']}'s {fg_distance}-yard FG attempt is NO GOOD ({miss_reason})."
             state["possession"] = def_id
             state["ball_on"] = 100 - ball_on
             state["down"] = 1
@@ -460,13 +470,16 @@ def _apply_starters_override(all_players: List[Dict], depth_chart: Optional[Dict
 
 def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None,
                        injuries=None, difficulty="arcade", allow_ot=True,
-                       roll_new_injuries=True, custom_rosters=None, coaching=None) -> Dict:
+                       roll_new_injuries=True, custom_rosters=None, coaching=None,
+                       playbook=None, rivalry=False) -> Dict:
     from nfl_data import TEAMS
     teams = {t["id"]: t for t in TEAMS}
     depth_charts = depth_charts or {}
     injuries = injuries or {}
     custom_rosters = custom_rosters or {}
     coaching = coaching or {}
+    playbook = playbook or {}
+    rivalry_bump = 1 if rivalry else 0
     mult = DIFFICULTY_MULT.get(difficulty, 1.0)
 
     def _roster(tid):
@@ -487,7 +500,7 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
     max_plays = 220
 
     while state["quarter"] <= 4 and len(plays) < max_plays:
-        ev = simulate_play(state, teams, players, weather_code, pstats, mult, coaching)
+        ev = simulate_play(state, teams, players, weather_code, pstats, mult, coaching, playbook, rivalry_bump)
         plays.append(ev)
         _accumulate_stats(stats, ev)
 
@@ -498,7 +511,7 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
         state["quarter"] = 5
         ot_plays = 0
         while ot_plays < 40:
-            ev = simulate_play(state, teams, players, weather_code, pstats, mult, coaching)
+            ev = simulate_play(state, teams, players, weather_code, pstats, mult, coaching, playbook, rivalry_bump)
             plays.append(ev)
             _accumulate_stats(stats, ev)
             ot_plays += 1
@@ -525,6 +538,8 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
         "weather": weather_code,
         "difficulty": difficulty,
         "coaching": coaching,
+        "playbook": playbook,
+        "rivalry": bool(rivalry),
         "new_injuries": new_injuries,
     }
 

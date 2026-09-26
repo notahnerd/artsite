@@ -18,6 +18,7 @@ from weather import WEATHER_TYPES, roll_weather
 from playoffs import seed_playoffs, build_bracket, advance_bracket, ROUND_LABELS
 from injuries import active_injuries, injured_names
 from franchise import roll_franchise_year
+from rivalries import is_rivalry, annotate_schedule, division_rivals, LEGACY_RIVALRIES
 
 
 ROOT_DIR = Path(__file__).parent
@@ -82,6 +83,18 @@ class NextYearReq(BaseModel):
     season_id: str
 
 
+class PlaybookReq(BaseModel):
+    season_id: str
+    team: str
+    pass_bias: float  # -0.25 to 0.25
+
+
+class RivalPickReq(BaseModel):
+    season_id: str
+    team: str
+    rival: str
+
+
 # ---------- Helpers ----------
 async def _load_season(season_id):
     s = await db.seasons.find_one({"id": season_id}, {"_id": 0})
@@ -124,6 +137,14 @@ def _team_roster_with_trades(season, team_id):
 
 def _coaching(season):
     return season.get("coaching") or {}
+
+
+def _playbook(season):
+    return season.get("playbook") or {}
+
+
+def _is_rivalry(season, home, away):
+    return is_rivalry(home, away, season.get("extra_rivals") or {})
 
 
 # ---------- Routes ----------
@@ -183,6 +204,7 @@ async def create_season(req: CreateSeasonReq):
     # Pre-roll weather for each game so it's deterministic across replays
     for g in schedule:
         g["weather"] = roll_weather(g["home"])
+    annotate_schedule(schedule)
     doc = {
         "id": season_id,
         "user_team": req.user_team,
@@ -231,6 +253,8 @@ async def sim_game(req: SimGameReq):
         custom_rosters={game["home"]: _team_roster_with_trades(s, game["home"]),
                         game["away"]: _team_roster_with_trades(s, game["away"])},
         coaching=_coaching(s),
+        playbook=_playbook(s),
+        rivalry=game.get("rivalry", False) or _is_rivalry(s, game["home"], game["away"]),
     )
     if game["played"]:
         if game.get("log_id"):
@@ -279,6 +303,8 @@ async def sim_week(req: SimWeekReq):
             custom_rosters={g["home"]: _team_roster_with_trades(s, g["home"]),
                             g["away"]: _team_roster_with_trades(s, g["away"])},
             coaching=_coaching(s),
+            playbook=_playbook(s),
+            rivalry=g.get("rivalry", False) or _is_rivalry(s, g["home"], g["away"]),
             allow_ot=False,
         )
         g["played"] = True
@@ -529,6 +555,8 @@ async def sim_playoff_game(req: PlayoffGameReq):
         custom_rosters={game["home"]: _team_roster_with_trades(s, game["home"]),
                         game["away"]: _team_roster_with_trades(s, game["away"])},
         coaching=_coaching(s),
+        playbook=_playbook(s),
+        rivalry=True,  # playoff games always intense
         allow_ot=True,
         roll_new_injuries=False,
     )
@@ -554,6 +582,45 @@ async def sim_playoff_game(req: PlayoffGameReq):
             g["weather"] = roll_weather(g["home"])
     await db.seasons.update_one({"id": req.season_id}, {"$set": {"playoffs": bracket}})
     return {"game": game, "result": result, "bracket": bracket}
+
+
+# ---------- Playbook & Rivalry ----------
+@api.post("/season/playbook")
+async def set_playbook(req: PlaybookReq):
+    bias = max(-0.25, min(0.25, req.pass_bias))
+    s = await _load_season(req.season_id)
+    pb = s.get("playbook") or {}
+    pb[req.team] = bias
+    await db.seasons.update_one({"id": req.season_id}, {"$set": {"playbook": pb}})
+    return {"playbook": pb}
+
+
+@api.post("/season/rival")
+async def set_rival(req: RivalPickReq):
+    if not get_team(req.rival):
+        raise HTTPException(400, "Invalid rival team")
+    s = await _load_season(req.season_id)
+    extras = s.get("extra_rivals") or {}
+    extras[req.team] = req.rival
+    # Re-annotate schedule so rivalry games reflect the pick
+    for g in s["schedule"]:
+        g["rivalry"] = is_rivalry(g["home"], g["away"], extras)
+    await db.seasons.update_one(
+        {"id": req.season_id},
+        {"$set": {"extra_rivals": extras, "schedule": s["schedule"]}},
+    )
+    return {"extra_rivals": extras}
+
+
+@api.get("/season/{season_id}/rivals/{team_id}")
+async def team_rivals(season_id: str, team_id: str):
+    s = await _load_season(season_id)
+    extras = s.get("extra_rivals") or {}
+    return {
+        "division_rivals": division_rivals(team_id),
+        "legacy_rivals": [pair for pair in [list(x) for x in LEGACY_RIVALRIES] if team_id in pair],
+        "extra_rival": extras.get(team_id),
+    }
 
 
 # ---------- Coaching Philosophy ----------

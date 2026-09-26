@@ -34,3 +34,14 @@ NFL football simulation game with dice rolls and chart-based outcomes using real
 - Endpoints: /api/teams, /api/team-cards, /api/player-card, /api/season/*, /api/season/depth-chart, /api/season/{id}/leaders, /api/season/{id}/playoff-race, /api/season/{id}/injuries, /api/season/trade, /api/season/difficulty, /api/season/coaching, /api/season/{id}/franchise, /api/season/next-year, /api/season/{id}/start-playoffs, /api/season/playoff-game, /api/game-log/{id}/share
 - Frontend pages: Home, Season, Game (regular+playoff), Chart, LeadersPage, Playoffs, Franchise, Share
 - Frontend components: Scoreboard, Field, Dice, PlayByPlay, BoxScore, PlayerCard, DepthChartDialog, WeatherBadge, Leaders, PlayoffRace, InjuryReport, InjuryTicker, TradeDialog, DifficultyPicker, CoachingPicker
+
+### Sim Refinements (v5 - 2026-02)
+- **Kicker Card**: every kicker now has their own 3–18 accuracy chart (WIDE LEFT/RIGHT → PURE → BOOMSTICK) with a personal max range; weather kicking penalties trim range in bad conditions
+- **Custom Playbook**: per-team run/pass tendency slider stacks on top of coaching philosophy (Run Heavy → Pass Heavy, five steps)
+- **Rivalry System**: division opponents + legacy pairs (KC-LV, BAL-PIT, DAL-PHI, GB-CHI, etc.) are auto-flagged; managers can pick one extra rival; rivalry games get a +1 chart bump for extra big plays
+
+## New Endpoints
+- POST /api/season/playbook, POST /api/season/rival, GET /api/season/{id}/rivals/{team}
+
+## New Components
+- PlaybookPicker, RivalPickerDialog, RivalryBadge

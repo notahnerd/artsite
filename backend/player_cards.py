@@ -202,6 +202,34 @@ def resolve_run(rb: Dict, def_team: Dict, roll_sum: int, read: str) -> Tuple[int
     return cell["yards"], cell["event"]
 
 
+# ---------- Kicker (Offense read) ----------
+def k_card(player: Dict) -> Dict[int, Dict]:
+    """Kicker accuracy card. Reading is 'HIT' (make), 'MISS', or 'BOMB' (great kick).
+    range_bonus tells how much extra distance the kicker can hit on that roll.
+    """
+    ovr = player["ovr"]
+    s = _skew(ovr)
+    max_range = 40 + int(round((ovr - 60) / 3))  # 60 OVR => 40 yd, 90 OVR => 50 yd, 99 => 53
+    return {
+        3:  {"result": "WIDE_LEFT",  "range_bonus": 0,           "make": False},
+        4:  {"result": "WIDE_RIGHT", "range_bonus": 0,           "make": False},
+        5:  {"result": "HOOK",       "range_bonus": -8,          "make": None},
+        6:  {"result": "SLICE",      "range_bonus": -4,          "make": None},
+        7:  {"result": "STRAIGHT",   "range_bonus": 0,           "make": None},
+        8:  {"result": "STRAIGHT",   "range_bonus": 1,           "make": None},
+        9:  {"result": "STRAIGHT",   "range_bonus": 3,           "make": None},
+        10: {"result": "STRAIGHT",   "range_bonus": 5,           "make": None},
+        11: {"result": "STRAIGHT",   "range_bonus": 6,           "make": None},
+        12: {"result": "STRAIGHT",   "range_bonus": 7,           "make": None},
+        13: {"result": "STRAIGHT",   "range_bonus": 8,           "make": None},
+        14: {"result": "PURE",       "range_bonus": 10,          "make": None},
+        15: {"result": "PURE",       "range_bonus": 12,          "make": None},
+        16: {"result": "BOMB",       "range_bonus": 15,          "make": None},
+        17: {"result": "BOMB",       "range_bonus": 18,          "make": None},
+        18: {"result": "BOOMSTICK",  "range_bonus": 25,          "make": True},
+    }, max_range
+
+
 def full_card(player: Dict) -> Dict:
     pos = player["pos"]
     if pos == "QB":
@@ -210,6 +238,9 @@ def full_card(player: Dict) -> Dict:
         return {"type": "RB", "chart": rb_card(player)}
     if pos in ("WR", "TE"):
         return {"type": pos, "chart": wr_card(player)}
+    if pos == "K":
+        chart, max_range = k_card(player)
+        return {"type": "K", "chart": chart, "max_range": max_range}
     ovr = player["ovr"]
     s = _skew(ovr)
     return {"type": "DEF", "chart": {

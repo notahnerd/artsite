@@ -9,6 +9,7 @@ import PlayByPlay from "@/components/PlayByPlay";
 import BoxScore from "@/components/BoxScore";
 import Dice from "@/components/Dice";
 import WeatherBadge from "@/components/WeatherBadge";
+import RivalryBadge from "@/components/RivalryBadge";
 import InjuryTicker from "@/components/InjuryTicker";
 import { Share2 } from "lucide-react";
 
@@ -130,8 +131,9 @@ export default function Game({ playoff = false }) {
       <div className="max-w-[1500px] mx-auto px-3 lg:px-6 py-4 md:py-6 space-y-4">
         <InjuryTicker seasonId={id} teamsById={teamsById} />
         {game.weather && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <WeatherBadge code={game.weather} size="lg" />
+            {game.rivalry && <RivalryBadge />}
             {playoff && (
               <span className="px-3 py-1.5 rounded font-mono uppercase tracking-widest text-xs border bg-amber-500/20 text-amber-300 border-amber-500/40">
                 PLAYOFF • {game.id?.replace(/-/g, " ")}
