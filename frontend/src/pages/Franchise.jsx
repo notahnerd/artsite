@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api, getSeason } from "@/lib/api";
+import { api, getSeason, saveOwnerToken } from "@/lib/api";
 import { toast } from "sonner";
 import Nav from "@/components/Nav";
 import { Trophy, Sparkles, Calendar } from "lucide-react";
@@ -26,6 +26,9 @@ export default function Franchise() {
     setRolling(true);
     try {
       const r = await api.post("/season/next-year", { season_id: id });
+      if (r.data?.new_season_id && r.data?.owner_token) {
+        saveOwnerToken(r.data.new_season_id, r.data.owner_token);
+      }
       toast.success(`Welcome to ${r.data.year} season!`);
       localStorage.setItem("gr_last_season", JSON.stringify({ id: r.data.new_season_id, team: season.user_team }));
       nav(`/season/${r.data.new_season_id}`);

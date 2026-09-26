@@ -1,10 +1,16 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Header
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
 import logging
 import uuid
+import secrets
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List
@@ -28,8 +34,34 @@ mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
+# ---------- Rate limiter ----------
+limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+
 app = FastAPI(title="NFL Sim API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 api = APIRouter(prefix="/api")
+
+# ---------- Security middleware ----------
+MAX_BODY_BYTES = 1 * 1024 * 1024  # 1 MB
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Enforce request body size cap
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+            return JSONResponse({"detail": "Request body too large"}, status_code=413)
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ---------- Models ----------
@@ -101,6 +133,21 @@ async def _load_season(season_id):
     if not s:
         raise HTTPException(404, "Season not found")
     return s
+
+
+async def _load_season_owned(season_id: str, x_owner_token: Optional[str]):
+    """Load season and verify ownership token for mutations.
+    Grandfathered: seasons created before this change have no owner_token and remain open."""
+    s = await _load_season(season_id)
+    expected = s.get("owner_token")
+    if expected and expected != (x_owner_token or ""):
+        raise HTTPException(403, "Invalid owner token")
+    return s
+
+
+def _validate_team(team_id: str):
+    if not get_team(team_id):
+        raise HTTPException(400, f"Invalid team: {team_id}")
 
 
 def _get_depth(season, team_id):
@@ -196,10 +243,12 @@ async def weather_types():
 
 # ---------- Season ----------
 @api.post("/season/create")
-async def create_season(req: CreateSeasonReq):
+@limiter.limit("10/minute")
+async def create_season(request: Request, req: CreateSeasonReq):
     if not get_team(req.user_team):
         raise HTTPException(400, "Invalid team")
     season_id = str(uuid.uuid4())
+    owner_token = secrets.token_urlsafe(32)
     schedule = generate_schedule(season_id, weeks=18)
     # Pre-roll weather for each game so it's deterministic across replays
     for g in schedule:
@@ -207,6 +256,7 @@ async def create_season(req: CreateSeasonReq):
     annotate_schedule(schedule)
     doc = {
         "id": season_id,
+        "owner_token": owner_token,
         "user_team": req.user_team,
         "year": req.year,
         "difficulty": req.difficulty if req.difficulty in DIFFICULTY_MULT else "balanced",
@@ -222,12 +272,14 @@ async def create_season(req: CreateSeasonReq):
     }
     await db.seasons.insert_one(doc)
     doc.pop("_id", None)
+    # Do NOT leak owner_token in listing/reads — but return it once on create so client can persist it.
     return doc
 
 
 @api.get("/season/{season_id}")
 async def get_season(season_id: str):
     s = await _load_season(season_id)
+    s.pop("owner_token", None)
     s["standings"] = compute_standings(s["schedule"])
     return s
 
@@ -239,8 +291,9 @@ async def standings(season_id: str):
 
 
 @api.post("/season/sim-game")
-async def sim_game(req: SimGameReq):
-    s = await _load_season(req.season_id)
+@limiter.limit("60/minute")
+async def sim_game(request: Request, req: SimGameReq, x_owner_token: Optional[str] = Header(None)):
+    s = await _load_season_owned(req.season_id, x_owner_token)
     game = next((g for g in s["schedule"] if g["game_id"] == req.game_id), None)
     if not game:
         raise HTTPException(404, "Game not found")
@@ -288,8 +341,9 @@ async def sim_game(req: SimGameReq):
 
 
 @api.post("/season/sim-week")
-async def sim_week(req: SimWeekReq):
-    s = await _load_season(req.season_id)
+@limiter.limit("30/minute")
+async def sim_week(request: Request, req: SimWeekReq, x_owner_token: Optional[str] = Header(None)):
+    s = await _load_season_owned(req.season_id, x_owner_token)
     played_games = []
     for g in s["schedule"]:
         if g["week"] != req.week or g["played"]:
@@ -348,8 +402,9 @@ async def game_log(log_id: str):
 
 # ---------- Depth chart ----------
 @api.post("/season/depth-chart")
-async def update_depth_chart(req: DepthChartUpdate):
-    s = await _load_season(req.season_id)
+async def update_depth_chart(req: DepthChartUpdate, x_owner_token: Optional[str] = Header(None)):
+    _validate_team(req.team)
+    s = await _load_season_owned(req.season_id, x_owner_token)
     depth = s.get("depth_charts") or {}
     depth[req.team] = req.depth
     await db.seasons.update_one({"id": req.season_id}, {"$set": {"depth_charts": depth}})
@@ -384,9 +439,10 @@ async def list_injuries(season_id: str):
 
 # ---------- Difficulty ----------
 @api.post("/season/difficulty")
-async def set_difficulty(req: DifficultyReq):
+async def set_difficulty(req: DifficultyReq, x_owner_token: Optional[str] = Header(None)):
     if req.difficulty not in DIFFICULTY_MULT:
         raise HTTPException(400, "Invalid difficulty")
+    await _load_season_owned(req.season_id, x_owner_token)
     await db.seasons.update_one({"id": req.season_id}, {"$set": {"difficulty": req.difficulty}})
     return {"difficulty": req.difficulty}
 
@@ -404,8 +460,10 @@ async def list_difficulties():
 
 # ---------- Trades ----------
 @api.post("/season/trade")
-async def make_trade(req: TradeReq):
-    s = await _load_season(req.season_id)
+async def make_trade(req: TradeReq, x_owner_token: Optional[str] = Header(None)):
+    _validate_team(req.my_team)
+    _validate_team(req.other_team)
+    s = await _load_season_owned(req.season_id, x_owner_token)
     if s.get("current_week", 1) != 8:
         raise HTTPException(400, "Trades only allowed at Week 8")
     my_roster = _team_roster_with_trades(s, req.my_team)
@@ -513,8 +571,8 @@ async def leaders(season_id: str, category: str = "all"):
 
 # ---------- Playoffs ----------
 @api.post("/season/{season_id}/start-playoffs")
-async def start_playoffs(season_id: str):
-    s = await _load_season(season_id)
+async def start_playoffs(season_id: str, x_owner_token: Optional[str] = Header(None)):
+    s = await _load_season_owned(season_id, x_owner_token)
     all_played = all(g["played"] for g in s["schedule"])
     if not all_played:
         raise HTTPException(400, "Regular season not complete")
@@ -530,8 +588,9 @@ async def start_playoffs(season_id: str):
 
 
 @api.post("/season/playoff-game")
-async def sim_playoff_game(req: PlayoffGameReq):
-    s = await _load_season(req.season_id)
+@limiter.limit("60/minute")
+async def sim_playoff_game(request: Request, req: PlayoffGameReq, x_owner_token: Optional[str] = Header(None)):
+    s = await _load_season_owned(req.season_id, x_owner_token)
     bracket = s.get("playoffs")
     if not bracket:
         raise HTTPException(400, "Playoffs not started")
@@ -586,9 +645,10 @@ async def sim_playoff_game(req: PlayoffGameReq):
 
 # ---------- Playbook & Rivalry ----------
 @api.post("/season/playbook")
-async def set_playbook(req: PlaybookReq):
+async def set_playbook(req: PlaybookReq, x_owner_token: Optional[str] = Header(None)):
+    _validate_team(req.team)
     bias = max(-0.25, min(0.25, req.pass_bias))
-    s = await _load_season(req.season_id)
+    s = await _load_season_owned(req.season_id, x_owner_token)
     pb = s.get("playbook") or {}
     pb[req.team] = bias
     await db.seasons.update_one({"id": req.season_id}, {"$set": {"playbook": pb}})
@@ -596,10 +656,11 @@ async def set_playbook(req: PlaybookReq):
 
 
 @api.post("/season/rival")
-async def set_rival(req: RivalPickReq):
+async def set_rival(req: RivalPickReq, x_owner_token: Optional[str] = Header(None)):
+    _validate_team(req.team)
     if not get_team(req.rival):
         raise HTTPException(400, "Invalid rival team")
-    s = await _load_season(req.season_id)
+    s = await _load_season_owned(req.season_id, x_owner_token)
     extras = s.get("extra_rivals") or {}
     extras[req.team] = req.rival
     # Re-annotate schedule so rivalry games reflect the pick
@@ -625,10 +686,11 @@ async def team_rivals(season_id: str, team_id: str):
 
 # ---------- Coaching Philosophy ----------
 @api.post("/season/coaching")
-async def set_coaching(req: CoachingReq):
+async def set_coaching(req: CoachingReq, x_owner_token: Optional[str] = Header(None)):
     if req.philosophy not in ("aggressive", "balanced", "conservative"):
         raise HTTPException(400, "Invalid philosophy")
-    s = await _load_season(req.season_id)
+    _validate_team(req.team)
+    s = await _load_season_owned(req.season_id, x_owner_token)
     coaching = s.get("coaching") or {}
     coaching[req.team] = req.philosophy
     await db.seasons.update_one({"id": req.season_id}, {"$set": {"coaching": coaching}})
@@ -643,8 +705,9 @@ async def get_coaching(season_id: str):
 
 # ---------- Franchise (multi-year) ----------
 @api.post("/season/next-year")
-async def next_year(req: NextYearReq):
-    s = await _load_season(req.season_id)
+@limiter.limit("5/minute")
+async def next_year(request: Request, req: NextYearReq, x_owner_token: Optional[str] = Header(None)):
+    s = await _load_season_owned(req.season_id, x_owner_token)
     # Ensure playoffs done (super bowl champion set) or regular season done
     playoffs = s.get("playoffs") or {}
     champion = playoffs.get("champion")
@@ -663,13 +726,15 @@ async def next_year(req: NextYearReq):
     franchise_id = s.get("franchise_id") or s["id"]
     next_year_num = (s.get("year") or 2025) + 1
 
-    # Create new season doc
+    # Create new season doc (inherits ownership from previous season)
     new_season_id = str(uuid.uuid4())
+    new_owner_token = s.get("owner_token") or secrets.token_urlsafe(32)
     schedule = generate_schedule(new_season_id, weeks=18)
     for g in schedule:
         g["weather"] = roll_weather(g["home"])
     new_doc = {
         "id": new_season_id,
+        "owner_token": new_owner_token,
         "user_team": s["user_team"],
         "year": next_year_num,
         "difficulty": s.get("difficulty", "balanced"),
@@ -694,6 +759,7 @@ async def next_year(req: NextYearReq):
     new_doc.pop("_id", None)
     return {
         "new_season_id": new_season_id,
+        "owner_token": new_owner_token,
         "retirements": retirements,
         "rookies": rookies,
         "champions_history": history,
@@ -740,12 +806,17 @@ async def share_game(log_id: str):
 
 
 app.include_router(api)
+
+_cors_env = os.environ.get("CORS_ORIGINS", "*").strip()
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+# If wildcard, disable credentials (spec violation + hardening: audit SEC P3)
+_allow_credentials = not (len(_cors_origins) == 1 and _cors_origins[0] == "*")
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=_allow_credentials,
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Owner-Token", "Authorization"],
 )
 
 logging.basicConfig(level=logging.INFO)
