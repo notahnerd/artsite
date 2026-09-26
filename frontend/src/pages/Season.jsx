@@ -14,7 +14,8 @@ import CoachingPicker from "@/components/CoachingPicker";
 import PlaybookPicker from "@/components/PlaybookPicker";
 import RivalPickerDialog from "@/components/RivalPickerDialog";
 import RivalryBadge from "@/components/RivalryBadge";
-import { Settings, RefreshCw, Bandage, Swords } from "lucide-react";
+import DeckBuilder from "@/components/DeckBuilder";
+import { Settings, RefreshCw, Bandage, Swords, Layers } from "lucide-react";
 
 export default function Season() {
   const { id } = useParams();
@@ -26,6 +27,7 @@ export default function Season() {
   const [depthOpen, setDepthOpen] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(false);
   const [rivalOpen, setRivalOpen] = useState(false);
+  const [deckOpen, setDeckOpen] = useState(false);
 
   const load = async () => {
     const s = await getSeason(id);
@@ -103,6 +105,13 @@ export default function Season() {
               className="px-3 py-2 rounded-md bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-display font-bold uppercase tracking-wider text-xs flex items-center gap-1.5"
             >
               <Swords size={12} /> Rivals
+            </button>
+            <button
+              onClick={() => setDeckOpen(true)}
+              data-testid="open-deck-builder-btn"
+              className="px-3 py-2 rounded-md bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300 border border-fuchsia-500/40 font-display font-bold uppercase tracking-wider text-xs flex items-center gap-1.5"
+            >
+              <Layers size={12} /> Flippy Deck
             </button>
             {currentWeek === 8 && !isPlayoffsReady && (
               <button
@@ -266,6 +275,11 @@ export default function Season() {
               open={rivalOpen}
               onOpenChange={setRivalOpen}
               onSaved={load}
+            />
+            <DeckBuilder
+              seasonId={id}
+              open={deckOpen}
+              onClose={() => setDeckOpen(false)}
             />
           </>
         )}

@@ -502,7 +502,7 @@ def _apply_starters_override(all_players: List[Dict], depth_chart: Optional[Dict
 def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None,
                        injuries=None, difficulty="arcade", allow_ot=True,
                        roll_new_injuries=True, custom_rosters=None, coaching=None,
-                       playbook=None, rivalry=False) -> Dict:
+                       playbook=None, rivalry=False, deck_config=None) -> Dict:
     from nfl_data import TEAMS
     teams = {t["id"]: t for t in TEAMS}
     depth_charts = depth_charts or {}
@@ -525,7 +525,7 @@ def simulate_full_game(home_id, away_id, weather_code="CLEAR", depth_charts=None
             p["team"] = tid
 
     state = new_game_state(home_id, away_id)
-    state["deck"] = new_deck()
+    state["deck"] = new_deck(deck_config)
     plays = []
     stats = {home_id: _empty_stats(), away_id: _empty_stats()}
     pstats: Dict[str, Dict] = {}

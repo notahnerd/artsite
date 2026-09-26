@@ -96,6 +96,11 @@ export default function Game({ playoff = false }) {
     if (play.card_override && play.card?.type === "YARDS" && Math.abs(play.card.yards) >= 30) {
       toast.success(`🎴 Flippy Deck BREAKAWAY! +${play.card.yards}`);
     }
+    if (play.card?.signature && play.card?.label) {
+      toast(`✨ ${play.card.label} — ${play.card.yards >= 0 ? "+" : ""}${play.card.yards} yd`, {
+        style: { background: "rgba(217,70,239,0.15)", border: "1px solid rgba(232,121,249,0.4)" },
+      });
+    }
 
     rollTimerRef.current = setTimeout(() => {
       setRolling(false);

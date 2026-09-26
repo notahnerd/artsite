@@ -190,6 +190,11 @@ def _playbook(season):
     return season.get("playbook") or {}
 
 
+def _deck_config(season):
+    """Only use custom deck if the season has one set — unlocked in the UI at year 3."""
+    return season.get("deck_config") or None
+
+
 def _is_rivalry(season, home, away):
     return is_rivalry(home, away, season.get("extra_rivals") or {})
 
@@ -308,6 +313,7 @@ async def sim_game(request: Request, req: SimGameReq, x_owner_token: Optional[st
         coaching=_coaching(s),
         playbook=_playbook(s),
         rivalry=game.get("rivalry", False) or _is_rivalry(s, game["home"], game["away"]),
+        deck_config=_deck_config(s),
     )
     if game["played"]:
         if game.get("log_id"):
@@ -359,6 +365,7 @@ async def sim_week(request: Request, req: SimWeekReq, x_owner_token: Optional[st
             coaching=_coaching(s),
             playbook=_playbook(s),
             rivalry=g.get("rivalry", False) or _is_rivalry(s, g["home"], g["away"]),
+            deck_config=_deck_config(s),
             allow_ot=False,
         )
         g["played"] = True
@@ -616,6 +623,7 @@ async def sim_playoff_game(request: Request, req: PlayoffGameReq, x_owner_token:
         coaching=_coaching(s),
         playbook=_playbook(s),
         rivalry=True,  # playoff games always intense
+        deck_config=_deck_config(s),
         allow_ot=True,
         roll_new_injuries=False,
     )
@@ -684,6 +692,55 @@ async def team_rivals(season_id: str, team_id: str):
     }
 
 
+# ---------- Custom Flippy Deck (unlocked after Year 2) ----------
+class DeckConfigReq(BaseModel):
+    season_id: str
+    preset: Optional[str] = "balanced"     # balanced | power_run | air_raid | chaos
+    signature_cards: Optional[List[Dict]] = None
+
+
+def _deck_unlocked(season) -> bool:
+    """Unlocked when franchise has completed 2 full seasons.
+    Uses champions_history length; falls back to a year delta of 2.
+    """
+    history = season.get("champions_history") or []
+    if len(history) >= 2:
+        return True
+    # For fresh franchises, allow if year is >= inaugural_year + 2 (defensive)
+    year = season.get("year", 2025)
+    return year >= 2027
+
+
+@api.get("/season/{season_id}/deck-config")
+async def get_deck_config(season_id: str):
+    s = await _load_season(season_id)
+    from flippy_deck import SKEW_PRESETS, MAX_SIGNATURE_CARDS, MAX_SIGNATURE_COPIES
+    return {
+        "config": s.get("deck_config") or {"preset": "balanced", "signature_cards": []},
+        "unlocked": _deck_unlocked(s),
+        "year": s.get("year", 2025),
+        "seasons_played": len(s.get("champions_history") or []),
+        "presets": list(SKEW_PRESETS.keys()),
+        "max_signature_cards": MAX_SIGNATURE_CARDS,
+        "max_copies_per_card": MAX_SIGNATURE_COPIES,
+    }
+
+
+@api.post("/season/deck-config")
+async def set_deck_config(req: DeckConfigReq, x_owner_token: Optional[str] = Header(None)):
+    s = await _load_season_owned(req.season_id, x_owner_token)
+    if not _deck_unlocked(s):
+        raise HTTPException(403, "Custom Flippy Deck unlocks after 2 completed seasons")
+    from flippy_deck import SKEW_PRESETS, _sanitize_signature_cards
+    preset = (req.preset or "balanced").lower()
+    if preset not in SKEW_PRESETS:
+        raise HTTPException(400, f"Invalid preset. Choose one of: {list(SKEW_PRESETS.keys())}")
+    signature = _sanitize_signature_cards(req.signature_cards or [])
+    config = {"preset": preset, "signature_cards": signature}
+    await db.seasons.update_one({"id": req.season_id}, {"$set": {"deck_config": config}})
+    return {"config": config}
+
+
 # ---------- Coaching Philosophy ----------
 @api.post("/season/coaching")
 async def set_coaching(req: CoachingReq, x_owner_token: Optional[str] = Header(None)):
@@ -747,6 +804,8 @@ async def next_year(request: Request, req: NextYearReq, x_owner_token: Optional[
         "trade_removed": {},
         "playoffs": None,
         "coaching": s.get("coaching") or {},
+        "playbook": s.get("playbook") or {},
+        "deck_config": s.get("deck_config") or None,
         "franchise_id": franchise_id,
         "prev_season_id": s["id"],
         "franchise_rosters": new_rosters,

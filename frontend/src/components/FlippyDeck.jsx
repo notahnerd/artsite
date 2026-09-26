@@ -113,11 +113,14 @@ function CardFace({ card }) {
   }
   // YARDS
   const y = card.yards ?? 0;
+  const isSignature = !!card.signature;
   const isBreakaway = y >= 30;
   const isChunk = y >= 15 && y < 30;
   const isBig = y >= 8 && y < 15;
   const isLoss = y < 0;
-  const color = isBreakaway
+  const color = isSignature
+    ? "text-fuchsia-300"
+    : isBreakaway
     ? "text-emerald-300"
     : isChunk
     ? "text-emerald-300"
@@ -126,7 +129,9 @@ function CardFace({ card }) {
     : isLoss
     ? "text-rose-300"
     : "text-amber-300";
-  const label = isBreakaway
+  const label = isSignature
+    ? card.label || "Signature"
+    : isBreakaway
     ? "BREAKAWAY"
     : isChunk
     ? "Chunk Play"
@@ -134,9 +139,12 @@ function CardFace({ card }) {
     ? "Behind the Line"
     : "Yards";
   return (
-    <div className="flippy-front-inner text-center" data-testid="flippy-yards-card">
+    <div
+      className="flippy-front-inner text-center"
+      data-testid={isSignature ? "flippy-signature-card" : "flippy-yards-card"}
+    >
       <div className="text-[9px] font-mono uppercase tracking-[0.28em] text-slate-400">
-        Card says
+        {isSignature ? "Signature Card" : "Card says"}
       </div>
       <div
         className={`text-5xl font-display font-black tracking-tighter tabular-nums mt-1 leading-none ${color}`}
@@ -147,7 +155,7 @@ function CardFace({ card }) {
         {label}
       </div>
       <div className="text-[9px] font-mono text-slate-500 mt-1">
-        Skip the dice chart
+        {isSignature ? "Franchise pick" : "Skip the dice chart"}
       </div>
     </div>
   );
